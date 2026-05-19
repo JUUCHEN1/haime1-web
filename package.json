@@ -1,0 +1,15 @@
+{
+  "name": "hanime-web",
+  "version": "2.0.0",
+  "type": "module",
+  "description": "hanime1.me 管理面板 — HTTP 引擎 + Bun Web 服务",
+  "dependencies": {
+    "elysia": "^1.2.0"
+  },
+  "scripts": {
+    "start": "bun src/server.ts",
+    "engine": "python3 src/engine_server.py 5001",
+    "dev": "ENGINE_URL=http://127.0.0.1:5001 bun --hot src/server.ts",
+    "docker": "docker compose up -d --build"
+  }
+}

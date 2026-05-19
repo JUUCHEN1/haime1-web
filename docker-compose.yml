@@ -1,0 +1,11 @@
+version: "3.9"
+services:
+  hanime-web:
+    build: .
+    container_name: hanime-web
+    ports:
+      - "3280:3280"
+    restart: unless-stopped
+    environment:
+      - ENGINE_URL=http://127.0.0.1:5001
+      - PORT=3280
