@@ -31,6 +31,9 @@ def create_scraper():
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.5",
     })
+    proxy_url = os.environ.get("ENGINE_PROXY") or os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy") or ""
+    if proxy_url:
+        s.proxies = {"http": proxy_url, "https": proxy_url}
     return s
 
 
@@ -194,6 +197,20 @@ class EngineHandler(BaseHTTPRequestHandler):
                 result.update(action_video_info(self.scraper, request.get("video_id", "")))
             elif action == "user_uploaded":
                 result.update(action_user_uploaded(self.scraper, request.get("user_id", ""), request.get("page", 1)))
+            elif action == "cover":
+                video_id = request.get("video_id", "")
+                info = action_video_info(self.scraper, video_id)
+                if info.get("cover_url"):
+                    r = self.scraper.get(info["cover_url"], headers={"Referer": f"{BASE_URL}/"})
+                    if r.status_code == 200:
+                        self.send_response(200)
+                        self.send_header("Content-Type", r.headers.get("Content-Type", "image/jpeg"))
+                        self.send_header("Cache-Control", "public, max-age=86400")
+                        self.send_header("Content-Length", str(len(r.content)))
+                        self.end_headers()
+                        self.wfile.write(r.content)
+                        return
+                result["error"] = "cover not found"
             elif action == "download_url":
                 result.update(action_download_url(self.scraper, request.get("video_id", ""), request.get("quality", "1080p")))
             else:
@@ -212,7 +229,10 @@ class EngineHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def log_message(self, format, *args):
-        sys.stderr.write(f"[engine] {args[0]} {args[1]} {args[2]}\n")
+        try:
+            sys.stderr.write(f"[engine] {args[0] if len(args)>0 else '?'} {args[1] if len(args)>1 else '?'} {args[2] if len(args)>2 else '?'}\n")
+        except:
+            pass
 
 
 def main():

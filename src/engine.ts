@@ -56,7 +56,7 @@ async function callEngine(payload: Record<string, unknown>): Promise<unknown> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(60000),
   });
   if (!resp.ok) {
     const text = await resp.text().catch(() => "");

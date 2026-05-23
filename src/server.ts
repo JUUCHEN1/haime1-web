@@ -15,212 +15,458 @@ const APP = "hanime-web";
 const PORT = 3280;
 const PER_PAGE = 30;
 const DL_DIR = process.env.DL_DIR || join(process.env.HOME || "/tmp", "Downloads/hanime");
-// ─── 缓存 ───────────────────────────────────────────────────
+
+// ─── Cache ───────────────────────────────────────────────────
 const cache = new Map<string, { v: string[]; c: number; p: number; t: number }>();
 const CACHE_TTL = 5 * 60 * 1000;
 function cget(k: string) { const x = cache.get(k); if (x && Date.now() - x.t < CACHE_TTL) return x; return null; }
 function cset(k: string, v: string[], c: number, p: number) { cache.set(k, { v, c, p, t: Date.now() }); }
 
 // ─── i18n ───────────────────────────────────────────────────
-type Lang = "zh"|"en";
-function gl(h?: Record<string, string | undefined>): Lang { const m = (h?.cookie || "").match(/\blang=(zh|en)\b/); return (m?.[1] as Lang) || "zh"; }
+type Lang = "zh" | "en";
+function gl(h?: Record<string, string | undefined>): Lang {
+  const m = (h?.cookie || "").match(/\blang=(zh|en)\b/);
+  return (m?.[1] as Lang) || "zh";
+}
 const T: Record<string, string> = {
   home:"首页|Home",pl:"播放列表|Playlists",up:"上传视频|Uploads",dl:"下载管理|Downloads",
+  dc:"下载中心|Download Center",dc_single:"单视频|Single Video",dc_user:"作者作品|Author",
+  dc_single_desc:"输入视频链接或ID查看详情后下载|Enter a video link or ID to preview and download",
+  dc_user_desc:"输入用户链接或ID浏览所有作品|Enter a user link or ID to browse all works",
+  dc_input_ph:"输入 URL 或 ID|Enter URL or ID",dc_quality:"画质|Quality",
+  dc_preview:"查看|Preview",dc_no_result:"未找到结果|No result found",dc_loading:"加载中...|Loading...",
   quick:"快捷访问|Quick Access",user:"用户|User",search:"搜索用户ID...|Search user ID...",
   enter:"按 Enter 搜索|Press Enter to search",load:"加载中...|Loading...",back:"返回|Back",
   play:"播放|Play",dl_btn:"下载|DL",dl_all:"下载全部|DL All",dl_works:"下载全部作品|DL All Works",
   dl_q:"下载队列|Queue",dl_run:"下载中|Downloading",dl_done:"已完成|Completed",
   dl_err:"失败|Failed",dl_wait:"排队中|Queued",clear:"清除已完成|Clear Done",
-  no_dl:"暂无下载任务|No tasks",cancel:"取消|Cancel",dl_cancel:"已取消|Cancelled",dl_to:"下载到|Save to",srch:"搜索|Search",sing:"单个视频下载|Single Video",
+  no_dl:"暂无下载任务|No tasks",cancel:"取消|Cancel",dl_cancel:"已取消|Cancelled",
+  dl_to:"下载到|Save to",srch:"搜索|Search",sing:"单个视频下载|Single Video",
   pl_v:"个视频| videos",about:"浏览和下载 hanime1.me 视频。输入用户ID查看内容，支持单视频/播放列表/作者三种下载模式。|Browse and download hanime1.me videos. Enter a user ID to browse. Supports single, playlist, and author downloads.",
+  unavailable:"视频不可用|Video unavailable",no_info:"无信息|No info",
+  searching:"搜索中...|Searching...",result:"结果|Results",
 };
-function t(k:string,lang:Lang){const x=T[k];return x?x.split('|')[lang==='zh'?0:1]:k;}
-function esc(s:string){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
+function t(k: string, lang: Lang): string { const x = T[k]; return x ? x.split("|")[lang === "zh" ? 0 : 1] : k; }
+function esc(s: string): string { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;"); }
+function ts(k: string, lang: Lang): string { return esc(t(k, lang)); }
 
-// ─── 图标 ───────────────────────────────────────────────────
+// ─── SVG Icons ──────────────────────────────────────────────
+const svg = (d: string) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const I = {
-  home:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>`,
-  list:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`,
-  up:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>`,
-  srch:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="7"/><line x1="21" y1="21" x2="15" y2="15"/></svg>`,
-  play:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="8,5 19,12 8,19" fill="currentColor"/></svg>`,
-  dl:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
-  dl2:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
-  back:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>`,
-  ch:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>`,
-  chL:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>`,
-  grid:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>`,
-  usr:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>`,
-  info:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`,
-  ok:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
-  no:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+  home: svg(`<path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>`),
+  list: svg(`<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>`),
+  up: svg(`<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>`),
+  srch: svg(`<circle cx="10" cy="10" r="7"/><line x1="21" y1="21" x2="15" y2="15"/>`),
+  play: svg(`<polygon points="8,5 19,12 8,19" fill="currentColor"/>`),
+  dl: svg(`<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>`),
+  dl2: svg(`<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>`),
+  back: svg(`<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>`),
+  ch: svg(`<polyline points="9 18 15 12 9 6"/>`),
+  chL: svg(`<polyline points="15 18 9 12 15 6"/>`),
+  grid: svg(`<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>`),
+  usr: svg(`<path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/>`),
+  info: svg(`<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>`),
+  ok: svg(`<polyline points="20 6 9 17 4 12"/>`),
+  film: svg(`<rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/>`),
+  no: svg(`<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>`),
+  zz: svg(`<circle cx="12" cy="12" r="10"/><line x1="10" y1="15" x2="15" y2="9"/><circle cx="10" cy="9" r="1.5"/><circle cx="15" cy="15" r="1.5"/>`),
 };
 
-// ─── HTML 片段 ──────────────────────────────────────────────
-const i18nJS = (lang:Lang)=>`<script>const _lang='${lang}';function setLang(l){document.cookie='lang='+l+';path=/;max-age=31536000';localStorage.setItem('lang',l);location.reload()}
-document.addEventListener('click',function(e){var b=e.target.closest('[data-dl]');if(!b)return;var d=b.getAttribute('data-dl').split(':');fetch('/api/dl/'+d[0]+'/'+d[1],{method:'POST'}).then(function(r){return r.json()}).then(function(t){var s=document.getElementById('dl-s');if(s)s.textContent=_lang==='en'?'Queued: '+t.label:'已加入: '+t.label;setTimeout(function(){location.reload()},800)}).catch(function(){})})</script>`;
+// ─── Client JS ──────────────────────────────────────────────
+const i18nJS = (lang: Lang) => `<script>var _l='${lang}';function setLang(l){document.cookie='lang='+l+';path=/;max-age=31536000';localStorage.setItem('lang',l);location.reload()}
+document.addEventListener('click',function(e){var b=e.target.closest('[data-dl]');if(!b)return;var d=b.getAttribute('data-dl').split(':');(function(){var q='';var s=document.getElementById('dc-q');if(s)q=s.value;return fetch('/api/dl/'+d[0]+'/'+d[1]+(q?'?quality='+q:''),{method:'POST'})})().then(function(r){return r.json()}).then(function(t){var s=document.getElementById('dl-s');if(s)s.textContent=_l==='en'?'Queued: '+t.label:'已加入: '+t.label;setTimeout(function(){location.reload()},800)}).catch(function(){})});
+function dcPreview(type){var inp=document.getElementById('dc-inp');var raw=(inp&&inp.value||'').trim();if(!raw){alert(_l==='zh'?'请输入URL或ID':'Enter URL or ID');return;}var id=raw;var m;if(type==='video'){m=raw.match(/v=([0-9]+)/);id=m?m[1]:raw;}else if(type==='user'){var p=raw.split('/user/');id=p[p.length-1]||raw;}id=String(id).replace(/[^0-9]/g,'');if(!id){alert(_l==='zh'?'无法识别ID':'Cannot recognize ID');return;}var btn=document.getElementById('dc-preview-btn');var pre=document.getElementById('dc-preview');if(btn){btn.disabled=true;btn.textContent='...';}if(pre)pre.innerHTML='<div class="emp"><div class="skel skel-t" style="margin:0 auto"></div><div class="skel skel-m" style="margin:8px auto 0;width:30%"></div></div>';fetch('/api/dc/preview/'+type+'/'+id).then(function(r){return r.text()}).then(function(html){if(pre)pre.innerHTML=html;if(btn){btn.disabled=false;btn.textContent=_l==='zh'?'查看':'Preview';}}).catch(function(e){if(pre)pre.innerHTML='<div class="emp"><div class="emp-t">Error</div><div class="emp-d">'+(e.message||e)+'</div></div>';if(btn){btn.disabled=false;btn.textContent=_l==='zh'?'查看':'Preview';}});}</script>`;
 
-function shell(title:string,body:string,nav:string,lang:Lang):any{
-  return new Response(`<!DOCTYPE html><html lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>${esc(title)} — ${APP}</title><link rel="stylesheet" href="/styles.css"><script src="https://unpkg.com/htmx.org@2.0.4"></script>${i18nJS(lang)}</head><body><div class="app">
-<nav class="side"><a href="/" class="side-brand"><svg width="18" height="18" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3,3 19,11 3,19" fill="currentColor" stroke="none" opacity="0.2"/><polygon points="3,3 19,11 3,19" stroke="currentColor" fill="none"/><circle cx="9" cy="11" r="1.5" fill="currentColor"/></svg><span class="side-accent">hanime</span>web<span class="side-badge">v3</span></a>
+// ─── Shell ──────────────────────────────────────────────────
+function shell(title: string, body: string, nav: string, lang: Lang): Response {
+  return new Response(`<!DOCTYPE html><html lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>${esc(title)} — ${APP}</title><link rel="stylesheet" href="/styles.css"><script src="https://unpkg.com/htmx.org@2.0.4"></script>${i18nJS(lang)}</head><body><div class="geo-grid"></div><div class="app">
+<nav class="side">
+<a href="/" class="side-brand"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M2 17l10 5 10-5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M2 12l10 5 10-5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg><span class="side-accent">hanime</span>web<span class="side-badge">v4</span></a>
 <div class="side-nav">
 <a href="/" class="side-link${nav==='h'?' active':''}">${I.home}<span>${t("home",lang)}</span></a>
+<div class="side-section">${t("dc",lang)}</div>
+<a href="/dc/video" class="side-link${nav==='cv'?' active':''}">${I.film}<span>${t("dc_single",lang)}</span></a>
+<a href="/dc/user" class="side-link${nav==='cu'?' active':''}">${I.usr}<span>${t("dc_user",lang)}</span></a>
+<div class="side-section">${t("quick",lang)}</div>
 <a href="/downloads" class="side-link${nav==='d'?' active':''}" hx-get="/downloads" hx-target="#main-body" hx-push-url="true">${I.dl2}<span>${t("dl",lang)}</span></a>
-</div><div class="side-foot">${APP} · v3</div></nav>
+</div><div class="side-foot">${APP} · v4</div></nav>
 <div class="main"><header class="main-hdr"><span class="main-hdr-title">${esc(title)}</span><div class="main-hdr-right">${langBtn(lang)}</div></header>
 <div class="main-body" id="main-body">${body}</div></div></div></body></html>`,{headers:{"Content-Type":"text/html; charset=utf-8","Set-Cookie":`lang=${lang};path=/;max-age=31536000`}});
 }
-function hx(body:string,lang:Lang,title:string,nav:string,h?:Record<string,string|undefined>):any{
-  if(h?.["hx-request"])return new Response(body,{headers:{"Content-Type":"text/html; charset=utf-8"}});
-  return shell(title,body,nav,lang);
+function hx(body: string, lang: Lang, title: string, nav: string, h?: Record<string, string | undefined>): Response {
+  if (h?.["hx-request"]) return new Response(body, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+  return shell(title, body, nav, lang);
 }
-function langBtn(lang:Lang){return`<div class="flex g4"><button class="lang-btn${lang==='zh'?' active':''}" onclick="setLang('zh')">中</button><button class="lang-btn${lang==='en'?' active':''}" onclick="setLang('en')">EN</button></div>`;}
+function langBtn(lang: Lang): string {
+  return `<div class="lang-sw"><button class="lang-btn${lang==='zh'?' active':''}" onclick="setLang('zh')">中</button><button class="lang-btn${lang==='en'?' active':''}" onclick="setLang('en')">EN</button></div>`;
+}
 
-// ─── 页面 ───────────────────────────────────────────────────
-function homePage(lang:Lang):string{
-  return `<div class="srch" style="animation:fadeUp .35s var(--ease) both">
+// ─── DC page helper ─────────────────────────────────────────
+function dcPage(type: string, icon: string, color: string, label: string, desc: string, lang: Lang, opts?: { quality?: boolean }): string {
+  const qSel = opts?.quality
+    ? `<select class="inp" id="dc-q" style="width:90px"><option value="">默认</option><option>2160p</option><option>1080p</option><option selected>720p</option><option>480p</option><option>360p</option></select>`
+    : "";
+  return `<div style="animation:scaleIn .35s var(--ease) both">
+<div class="bento-p mb20">
+  <div class="bento-h">
+    <div class="bento-hl" style="color:var(--${color})">${icon} ${label}</div>
+  </div>
+  <div class="bento-b" style="padding:18px">
+    <div style="font-size:.78rem;color:var(--fg3);margin-bottom:14px;line-height:1.6">${desc}</div>
+    <div class="dc-bar">
+      <input id="dc-inp" class="inp" placeholder="${ts("dc_input_ph",lang)}" onkeydown="if(event.key==='Enter'){event.preventDefault();dcPreview('${type}')}">
+      ${qSel}
+      <button id="dc-preview-btn" class="btn btn-p" onclick="dcPreview('${type}')">${I.srch} ${t("dc_preview",lang)}</button>
+    </div>
+  </div>
+</div>
+<div id="dc-preview"></div></div>`;
+}
+
+// ─── Home ───────────────────────────────────────────────────
+function homePage(lang: Lang): string {
+  const running = dlQueue.filter(x => x.status === 'running').length;
+  const done = dlQueue.filter(x => x.status === 'done').length;
+  const queue = dlQueue.filter(x => x.status === 'queued').length;
+  const errd = dlQueue.filter(x => x.status === 'error').length;
+  return `<div class="srch">
     <form action="/search" method="GET" class="srch-w">
-      <input type="text" name="q" class="srch-i" placeholder="${t("search",lang)}" autofocus>
-      <button type="submit" class="btn btn-p btn-sm" style="margin:2px">${I.srch} ${t("srch",lang)}</button>
+      <input type="text" name="q" class="srch-i" placeholder="${ts("search",lang)}" autofocus>
+      <button type="submit" class="btn btn-p">${I.srch} ${t("srch",lang)}</button>
     </form>
     <div class="srch-h">${t("enter",lang)}</div>
   </div>
   <div class="st-grid">
-    ${st(I.dl2,"blue",String(dlQueue.filter(x=>x.status==='running').length),t("dl_run",lang),0)}
-    ${st(I.dl,"accent",String(dlQueue.filter(x=>x.status==='done').length),t("dl_done",lang),60)}
-    ${st(I.list,"green","0",t("pl",lang),120)}
-    ${st(I.up,"yellow","0",t("up",lang),180)}
+    <div class="st-card" style="--i:0">
+      <div class="st-hdr"><div class="st-icon blue">${I.dl2}</div></div>
+      <div class="st-val">${running}</div>
+      <div class="st-label">${t("dl_run",lang)}</div>
+    </div>
+    <div class="st-card" style="--i:1">
+      <div class="st-hdr"><div class="st-icon accent">${I.ok}</div></div>
+      <div class="st-val">${done}</div>
+      <div class="st-label">${t("dl_done",lang)}</div>
+    </div>
+    <div class="st-card" style="--i:2">
+      <div class="st-hdr"><div class="st-icon yellow">${I.dl2}</div></div>
+      <div class="st-val">${queue}</div>
+      <div class="st-label">${t("dl_wait",lang)}</div>
+    </div>
+    <div class="st-card" style="--i:3">
+      <div class="st-hdr"><div class="st-icon" style="color:var(--orange);background:var(--orange-dim)">${I.no}</div></div>
+      <div class="st-val">${errd}</div>
+      <div class="st-label">${t("dl_err",lang)}</div>
+    </div>
   </div>
-  <div class="bento bento-2">
-    <div class="bento-p"><div class="bento-h"><div class="bento-hl">${I.grid} ${t("quick",lang)}</div></div>
-    <div class="bento-b">
-      <div class="li" style="cursor:default;--i:0"><div class="li-th" style="background:var(--accent-bg);color:var(--accent)">?</div><div class="li-bd"><div class="li-t">${t("sing",lang)}</div><div class="li-m">${t("dl_to",lang)}: ${DL_DIR}</div></div></div>
-      <a href="/downloads" class="li" hx-get="/downloads" hx-target="#main-body" hx-push-url="true" style="--i:1"><div class="li-th" style="background:rgba(59,130,246,0.12);color:var(--blue)">DL</div><div class="li-bd"><div class="li-t">${t("dl",lang)}</div><div class="li-m">${dlQueue.filter(x=>x.status==='running').length} ${t("dl_run",lang)}</div></div><div class="li-act">${I.ch}</div></a>
-    </div></div>
-    <div class="bento-p"><div class="bento-h"><div class="bento-hl">${I.info} About</div></div><div class="bento-b" style="padding:20px"><div style="font-size:.8rem;color:var(--fg2);line-height:1.7;margin-bottom:10px">${t("about",lang)}</div><div class="flex g4" style="flex-wrap:wrap"><span class="qt">hanime-dl-lite</span><span class="qt">Elysia + HTMX</span><span class="qt">Docker</span></div></div></div>
+  <div class="bento bento-31">
+    <div class="bento-p">
+      <div class="bento-h"><div class="bento-hl">${I.grid} ${t("quick",lang)}</div></div>
+      <div class="bento-b stagger">
+        <a href="/dc/video" class="li"><div class="li-th" style="background:var(--green-dim);color:var(--green);font-family:var(--mono)">DC</div><div class="li-bd"><div class="li-t">${t("dc_single",lang)}</div><div class="li-m">URL / ID → ${t("dc_preview",lang)} → Download</div></div><div class="li-act">${I.ch}</div></a>
+        <a href="/downloads" class="li" hx-get="/downloads" hx-target="#main-body" hx-push-url="true"><div class="li-th" style="background:var(--blue-dim);color:var(--blue)">DL</div><div class="li-bd"><div class="li-t">${t("dl",lang)}</div><div class="li-m">${running} ${t("dl_run",lang)} · ${done} ${t("dl_done",lang)}</div></div><div class="li-act">${I.ch}</div></a>
+        <div class="li" style="cursor:default"><div class="li-th" style="background:var(--accent-dim);color:var(--accent);font-family:var(--mono)">#1</div><div class="li-bd"><div class="li-t">${t("dl_to",lang)}</div><div class="li-m" style="font-family:var(--mono)">${DL_DIR}</div></div></div>
+      </div>
+    </div>
+    <div class="bento-p">
+      <div class="bento-h"><div class="bento-hl">${I.info} About</div></div>
+      <div class="bento-b" style="padding:18px">
+        <div class="about-text">${t("about",lang)}</div>
+        <div class="dq"><span class="qt">Elysia</span><span class="qt">HTMX 2.0</span><span class="qt">Bun</span><span class="qt">Geist</span></div>
+      </div>
+    </div>
   </div>`;
 }
-function st(icon:string,clr:string,val:string,label:string,delay:number){return`<div class="st-card" style="animation-delay:${delay}ms"><div class="st-hdr"><div class="st-icon ${clr}">${icon}</div></div><div class="st-val">${val}</div><div class="st-label">${label}</div></div>`;}
 
-function plPage(pls:Playlist[],uid:string,lang:Lang):string{
-  return `<div class="flex aic jcb mb12"><div class="flex aic g8"><a href="/" class="btn btn-g btn-sm" style="padding:4px">${I.back}</a><h2 style="font-size:1.05rem;font-weight:550">${t("pl",lang)} <span class="tsm tmuted">（${pls.length}）</span></h2></div>
-    <div class="tabs-m"><a href="/user/${uid}/playlists" class="tab-m active">${t("pl",lang)}</a><a href="/user/${uid}/uploaded?page=1" class="tab-m" hx-get="/user/${uid}/uploaded?page=1" hx-target="#main-body" hx-push-url="true">${t("up",lang)}</a></div></div>
-    <div class="mb12"><button class="btn btn-p btn-sm" data-dl="user:${uid}">${I.dl} ${t("dl_works",lang)}（${pls.length} ${t("pl",lang)}）</button></div>
-    <div class="bento-p"><div class="bento-b" style="padding:4px">
-    ${pls.map((p,i)=>`<a href="/playlist/${p.id}" class="li" style="--i:${i*.05}" hx-get="/playlist/${p.id}" hx-target="#main-body" hx-push-url="true">
-      <div class="li-th" style="background:var(--accent-bg);color:var(--accent);font-family:var(--mono)">PL</div>
-      <div class="li-bd"><div class="li-t">${esc(p.title)}</div><div class="li-m">#${p.id}</div></div>
-      <div class="li-act">${I.ch}</div>
-    </a>`).join("")}
-  </div></div>`;
+// ─── Stat card helper ───────────────────────────────────────
+function stCard(icon: string, clr: string, val: string, label: string): string {
+  return `<div class="st-card"><div class="st-hdr"><div class="st-icon ${clr}">${icon}</div></div><div class="st-val">${val}</div><div class="st-label">${label}</div></div>`;
 }
 
-function vlPage(videos:string[],title:string,back:string,lang:Lang,dlBtns?:string,pageInfo?:string,pg?:string):string{
-  return `<div class="flex aic jcb mb12"><div class="flex aic g8"><a href="${back}" class="btn btn-g btn-sm" style="padding:4px">${I.back}</a><h2 style="font-size:1rem;font-weight:550">${esc(title)}</h2></div>${pageInfo?`<span class="tsm tmuted tm">${esc(pageInfo)}</span>`:''}</div>
-  ${pg||''}${dlBtns||''}
-  <div class="bento-p"><div class="bento-b" style="padding:4px">
-  ${videos.map((v,i)=>`<div class="li" style="cursor:default;--i:${i*.04}">
-    <div class="li-th" id="th-${v}"><span class="txs tmuted" hx-get="/api/thumb/${v}" hx-trigger="load" hx-swap="innerHTML">#${v}</span></div>
-    <div class="li-bd"><div class="li-t" id="ti-${v}">Video #${v}</div><div class="li-m"><span class="tm">#${v}</span></div></div>
+// ─── Playlist list page ─────────────────────────────────────
+function plPage(pls: Playlist[], uid: string, lang: Lang): string {
+  const count = pls.length;
+  return `<div class="flex aic jcb mb20">
+    <div class="flex aic g8"><a href="/" class="btn btn-g btn-sm" style="padding:5px 8px">${I.back}</a><h2 style="font-size:1rem;font-weight:600;color:var(--fg);letter-spacing:-.01em">${t("pl",lang)} <span style="font-size:.75rem;color:var(--fg3);font-weight:400;font-family:var(--mono)">${count}</span></h2></div>
+    <div class="tabs"><a href="/user/${uid}/playlists" class="tab active">${t("pl",lang)}</a><a href="/user/${uid}/uploaded?page=1" class="tab" hx-get="/user/${uid}/uploaded?page=1" hx-target="#main-body" hx-push-url="true">${t("up",lang)}</a></div>
+  </div>
+  <div class="mb12"><button class="btn btn-p btn-sm" data-dl="user:${uid}">${I.dl} ${t("dl_works",lang)} (${count})</button></div>
+  <div class="bento-p"><div class="bento-b stagger">${pls.map(p => `<a href="/playlist/${p.id}" class="li" hx-get="/playlist/${p.id}" hx-target="#main-body" hx-push-url="true">
+    <div class="li-th" style="background:var(--accent-bg);color:var(--accent);font-family:var(--mono)">PL</div>
+    <div class="li-bd"><div class="li-t">${esc(p.title)}</div><div class="li-m">#${p.id}</div></div>
+    <div class="li-act">${I.ch}</div>
+  </a>`).join("")}</div></div>`;
+}
+
+// ─── Video list (playlist / uploaded) ───────────────────────
+function vlPage(videos: string[], title: string, backUrl: string, lang: Lang, dlBtns?: string, pageInfo?: string, pgHtml?: string): string {
+  return `<div class="flex aic jcb mb20">
+    <div class="flex aic g8"><a href="${backUrl}" class="btn btn-g btn-sm" style="padding:5px 8px">${I.back}</a><h2 style="font-size:.95rem;font-weight:600;letter-spacing:-.01em">${esc(title)}</h2></div>
+    ${pageInfo ? `<span style="font-size:.7rem;color:var(--fg3);font-family:var(--mono)">${esc(pageInfo)}</span>` : ""}
+  </div>
+  ${pgHtml || ""}${dlBtns || ""}
+  <div class="bento-p"><div class="bento-b stagger">${videos.map(v => `<div class="li" style="cursor:default">
+    <div class="li-th"><img src="/api/cover/${v}" loading="lazy" style="width:100%;height:100%;object-fit:cover" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span style="display:none;font-size:.6rem;color:var(--fg4);font-family:var(--mono);align-items:center;justify-content:center;width:100%;height:100%">#${v}</span></div>
+    <div class="li-bd"><div class="li-t" id="ti-${v}">Video #${v}</div><div class="li-m" style="font-family:var(--mono)">#${v}</div></div>
     <div class="li-act btn-grp">
-      <a href="/api/play/${v}" target="_blank" class="btn btn-p btn-xs">${I.play}</a>
-      <button class="btn btn-s btn-xs" data-dl="video:${v}">${I.dl}</button>
+      <select class="inp" style="width:68px;padding:3px 4px;font-size:.64rem;font-family:var(--mono)" onchange="this.nextElementSibling.setAttribute('data-dl','video:${v}:'+this.value)"><option value="">720p</option><option>1080p</option><option selected>720p</option><option>480p</option><option>360p</option></select>
+      <button class="btn btn-s btn-xs" data-dl="video:${v}:720p" onclick="event.stopPropagation();var d=this.getAttribute('data-dl').split(':');fetch('/api/dl/'+d[0]+'/'+d[1]+'?quality='+d[2],{method:'POST'}).then(r=>r.json()).then(t=>{var s=document.getElementById('dl-s');if(s)s.textContent=_l==='zh'?'已加入: '+t.label:'Queued: '+t.label;setTimeout(()=>location.reload(),800)}).catch(()=>{})">${I.dl}</button>
     </div>
-  </div>`).join("")}
-  </div></div>${pg||''}`;
+  </div>`).join("")}</div></div>${pgHtml || ""}`;
 }
 
-function upPage(videos:string[],total:number,page:number,tp:number,uid:string,lang:Lang):string{
-  const s=(page-1)*PER_PAGE+1,e=Math.min(s+videos.length-1,total),pi=`${s}–${e} / ${total}`;
-  const mx=tp||Math.ceil(total/PER_PAGE);let ps:string[]=[];
-  if(mx>1){const a=Math.max(1,page-2),b=Math.min(mx,page+2);if(a>1)ps.push(`<a href="/user/${uid}/uploaded?page=1" class="btn btn-g btn-xs" hx-get="/user/${uid}/uploaded?page=1" hx-target="#main-body" hx-push-url="true">1</a>`);if(a>2)ps.push(`<span class="txs tmuted" style="padding:0 2px">...</span>`);for(let p=a;p<=b;p++)ps.push(p===page?`<span class="btn btn-p btn-xs" style="cursor:default;padding:3px 8px">${p}</span>`:`<a href="/user/${uid}/uploaded?page=${p}" class="btn btn-g btn-xs" hx-get="/user/${uid}/uploaded?page=${p}" hx-target="#main-body" hx-push-url="true">${p}</a>`);if(b<mx-1)ps.push(`<span class="txs tmuted" style="padding:0 2px">...</span>`);if(b<mx)ps.push(`<a href="/user/${uid}/uploaded?page=${mx}" class="btn btn-g btn-xs" hx-get="/user/${uid}/uploaded?page=${mx}" hx-target="#main-body" hx-push-url="true">${mx}</a>`);}
-  const pg=mx>1?`<div class="pg">${page>1?`<a href="/user/${uid}/uploaded?page=${page-1}" class="btn btn-g btn-xs" hx-get="/user/${uid}/uploaded?page=${page-1}" hx-target="#main-body" hx-push-url="true">${I.chL} Prev</a>`:''}${ps.join("")}${page<mx?`<a href="/user/${uid}/uploaded?page=${page+1}" class="btn btn-g btn-xs" hx-get="/user/${uid}/uploaded?page=${page+1}" hx-target="#main-body" hx-push-url="true">Next ${I.ch}</a>`:''}</div>`:'';
-  const dl=`<div class="mb12"><button class="btn btn-p btn-sm" data-dl="user:${uid}">${I.dl} ${t("dl_works",lang)}（${total} ${t("pl_v",lang).trim()}）</button></div>`;
-  return vlPage(videos,t("up",lang),`/user/${uid}/playlists`,lang,dl,pi,pg);
+// ─── Uploaded videos with pagination ────────────────────────
+function upPage(videos: string[], total: number, page: number, tp: number, uid: string, lang: Lang): string {
+  const s = (page - 1) * PER_PAGE + 1;
+  const e = Math.min(s + videos.length - 1, total);
+  const pi = `${s}-${e} / ${total}`;
+  const mx = tp || Math.ceil(total / PER_PAGE);
+  let ps: string[] = [];
+  if (mx > 1) {
+    const a = Math.max(1, page - 2), b = Math.min(mx, page + 2);
+    if (a > 1) ps.push(`<a href="/user/${uid}/uploaded?page=1" class="btn btn-g btn-xs" hx-get="/user/${uid}/uploaded?page=1" hx-target="#main-body" hx-push-url="true">1</a>`);
+    if (a > 2) ps.push(`<span style="font-size:.7rem;color:var(--fg4);padding:0 4px;font-family:var(--mono)">...</span>`);
+    for (let p = a; p <= b; p++) ps.push(p === page ? `<span class="btn btn-p btn-xs" style="cursor:default">${p}</span>` : `<a href="/user/${uid}/uploaded?page=${p}" class="btn btn-g btn-xs" hx-get="/user/${uid}/uploaded?page=${p}" hx-target="#main-body" hx-push-url="true">${p}</a>`);
+    if (b < mx - 1) ps.push(`<span style="font-size:.7rem;color:var(--fg4);padding:0 4px;font-family:var(--mono)">...</span>`);
+    if (b < mx) ps.push(`<a href="/user/${uid}/uploaded?page=${mx}" class="btn btn-g btn-xs" hx-get="/user/${uid}/uploaded?page=${mx}" hx-target="#main-body" hx-push-url="true">${mx}</a>`);
+  }
+  const pg = mx > 1 ? `<div class="pg">${page > 1 ? `<a href="/user/${uid}/uploaded?page=${page-1}" class="btn btn-g btn-xs" hx-get="/user/${uid}/uploaded?page=${page-1}" hx-target="#main-body" hx-push-url="true">${I.chL}</a>` : ""}${ps.join("")}${page < mx ? `<a href="/user/${uid}/uploaded?page=${page+1}" class="btn btn-g btn-xs" hx-get="/user/${uid}/uploaded?page=${page+1}" hx-target="#main-body" hx-push-url="true">${I.ch}</a>` : ""}</div>` : "";
+  const dl = `<div class="mb12"><button class="btn btn-p btn-sm" data-dl="user:${uid}">${I.dl} ${t("dl_works",lang)} (${total} ${t("pl_v",lang).trim()})</button></div>`;
+  return vlPage(videos, t("up",lang), `/user/${uid}/playlists`, lang, dl, pi, pg);
 }
 
-function plVideosPage(videos:string[],plId:string,lang:Lang):string{
-  const dl=`<div class="mb12"><button class="btn btn-p btn-sm" data-dl="playlist:${plId}">${I.dl} ${t("dl_all",lang)}（${videos.length}）</button></div>`;
-  return vlPage(videos,`#${plId} · ${videos.length} ${t("pl_v",lang).trim()}`,`javascript:history.back()`,lang,dl);
+// ─── Playlist videos ────────────────────────────────────────
+function plVideosPage(videos: string[], plId: string, lang: Lang): string {
+  const dl = `<div class="mb12"><button class="btn btn-p btn-sm" data-dl="playlist:${plId}">${I.dl} ${t("dl_all",lang)} (${videos.length})</button></div>`;
+  return vlPage(videos, `#${plId} · ${videos.length} ${t("pl_v",lang).trim()}`, `javascript:history.back()`, lang, dl);
 }
 
-function vdPage(info:VideoInfoResult,lang:Lang):string{
-  const q=info.qualities||Object.keys(info.videos||{});
-  if(!q.length)return`<div class="emp"><div class="emp-icon">${I.info}</div><div class="emp-t">Unavailable</div><div class="emp-d">${info.error||'No info'}</div></div>`;
-  return`<div class="mb12"><a href="javascript:history.back()" class="btn btn-g btn-sm" style="padding:4px">${I.back} ${t("back",lang)}</a></div>
-  <div class="dg">${info.cover_url?`<img src="${info.cover_url}" alt="" class="dc">`:`<div class="dc" style="aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;color:var(--fg3);font-size:.75rem">No cover</div>`}
-  <div class="di"><h1 class="dt">${esc(info.title)}</h1><div class="dm">#${info.video_id}</div>
-  <div class="dq">${q.map(qu=>`<span class="qt">${qu}</span>`).join("")}</div>
-  <div class="da">${q.map(qu=>`<a href="/api/play/${info.video_id}?quality=${qu}" target="_blank" class="btn btn-p btn-sm">${I.play} ${qu}</a>`).join("")}</div>
-  <div class="da">${q.map(qu=>`<a href="/api/dlurl/${info.video_id}?quality=${qu}" class="btn btn-s btn-sm">${I.dl} ${qu}</a>`).join("")}</div>
-  <div class="da mt12"><button class="btn btn-p btn-sm" data-dl="video:${info.video_id}">${I.dl} ${t("dl_btn",lang)}（hanime-dl）</button></div>
-  </div></div>`;
+// ─── Video detail page ──────────────────────────────────────
+function vdPage(info: VideoInfoResult, lang: Lang): string {
+  const q = info.qualities || Object.keys(info.videos || {});
+  if (!q.length) return `<div class="emp"><div class="emp-icon">${I.film}</div><div class="emp-t">${t("unavailable",lang)}</div><div class="emp-d">${info.error || t("no_info",lang)}</div></div>`;
+  return `<div class="mb12"><a href="javascript:history.back()" class="btn btn-g btn-sm" style="padding:5px 8px">${I.back} ${t("back",lang)}</a></div>
+  <div class="bento-p" style="overflow:visible"><div class="bento-b" style="padding:24px">
+  <div class="dg">
+    ${info.cover_url ? `<div class="dc"><img src="/api/cover/${info.video_id}" alt=""></div>` : `<div class="dc" style="aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;color:var(--fg4)">${I.film}</div>`}
+    <div class="di">
+      <h1 class="dt">${esc(info.title)}</h1>
+      <div class="dm">#${info.video_id}</div>
+      <div class="dq">${q.map(qu => `<span class="qt">${qu}</span>`).join("")}</div>
+      <div class="da mt12">
+        <select class="inp" id="dc-q" style="width:90px"><option value="">720p</option><option>2160p</option><option>1080p</option><option selected>720p</option><option>480p</option><option>360p</option></select>
+        <button class="btn btn-p btn-sm" data-dl="video:${info.video_id}">${I.dl} ${t("dl_btn",lang)}</button>
+        <a href="/api/dlurl/${info.video_id}" class="btn btn-s btn-sm">${I.dl} Direct</a>
+      </div>
+    </div>
+  </div></div></div>`;
 }
 
-function dlPage(lang:Lang):string{
-  const items=dlQueue.map(t=>{
-    const icon=t.status==='done'?I.ok:t.status==='error'?I.no:t.status==='cancelled'?`<span class="tm" style="color:var(--fg4)">\u2014</span>`:t.status==='running'?`<div style="display:inline-block;width:14px;height:14px;border:2px solid var(--bd2);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite"></div>`:`<span class="tm" style="color:var(--fg4)">#</span>`;
-    const label=t.quality?`${esc(t.label)} [${t.quality}]`:esc(t.label);
-    const canCancel=t.status==='queued'||t.status==='running';
-    const act=canCancel?`<button class="btn btn-g btn-xs" onclick="fetch('/api/dlcancel/${t.id}',{method:'POST'}).then(()=>location.reload())">${t("cancel",lang)}</button>`:'';
-    return`<div class="li"><div class="li-th" style="font-size:.7rem">${icon}</div><div class="li-bd"><div class="li-t">${label}</div><div class="li-m"><span class="qt" style="background:${t.status==='done'?'rgba(34,197,94,0.12)':t.status==='error'?'rgba(233,64,87,0.12)':t.status==='cancelled'?'rgba(128,128,128,0.12)':'var(--bg3)'};color:${t.status==='done'?'var(--green)':t.status==='error'?'var(--accent)':t.status==='cancelled'?'var(--fg4)':'var(--fg4)'}">${t.status==='done'?t("dl_done",lang):t.status==='error'?t("dl_err",lang):t.status==='cancelled'?t("dl_cancel",lang):t.status==='running'?t("dl_run",lang):t("dl_wait",lang)}</span> ${t.progress.slice(0,55)}</div></div>${act?`<div class="li-act">${act}</div>`:''}</div>`;
+// ─── Downloads page ─────────────────────────────────────────
+function dlPage(lang: Lang): string {
+  const items = dlQueue.map(task => {
+    const icon = task.status === 'done' ? I.ok : task.status === 'error' ? I.no : task.status === 'cancelled' ? `<span style="font-family:var(--mono);color:var(--fg4)">-</span>` : task.status === 'running' ? `<div class="dl-spinner"></div>` : `<span style="font-family:var(--mono);color:var(--fg4)">#</span>`;
+    const label = task.quality ? `${esc(task.label)} [${task.quality}]` : esc(task.label);
+    const canCancel = task.status === 'queued' || task.status === 'running';
+    const statusClr = task.status === 'done' ? 'var(--green)' : task.status === 'error' ? 'var(--accent)' : task.status === 'cancelled' ? 'var(--fg4)' : 'var(--fg4)';
+    const statusBg = task.status === 'done' ? 'var(--green-dim)' : task.status === 'error' ? 'var(--accent-dim)' : task.status === 'cancelled' ? 'rgba(128,128,128,.12)' : 'var(--bg3)';
+    const statusLabel = task.status === 'done' ? t("dl_done",lang) : task.status === 'error' ? t("dl_err",lang) : task.status === 'cancelled' ? t("dl_cancel",lang) : task.status === 'running' ? t("dl_run",lang) : t("dl_wait",lang);
+    const act = canCancel ? `<button class="btn btn-g btn-xs" onclick="fetch('/api/dlcancel/${task.id}',{method:'POST'}).then(()=>location.reload())">${t("cancel",lang)}</button>` : "";
+    return `<div class="li">
+      <div class="li-th" style="font-size:.8rem">${icon}</div>
+      <div class="li-bd"><div class="li-t">${label}</div><div class="li-m"><span class="dl-status" style="background:${statusBg};color:${statusClr}">${statusLabel}</span> ${(task.progress || "").slice(0, 55)}</div></div>
+      ${act ? `<div class="li-act">${act}</div>` : ""}
+    </div>`;
   }).join("");
-  return`<div class="flex aic jcb mb12"><h2 style="font-size:1.05rem;font-weight:550">${t("dl",lang)} <span class="tsm tmuted">（${dlQueue.length}）</span></h2>
-    ${dlQueue.filter(x=>x.status==='done'||x.status==='error'||x.status==='cancelled').length>0?`<button class="btn btn-g btn-sm" onclick="fetch('/api/dlclear',{method:'POST'}).then(()=>location.reload())">${t("clear",lang)}</button>`:''}</div>
-  <div class="tsm tmuted mb12">${t("dl_to",lang)}: ${DL_DIR}</div>
-  <div id="dl-list" hx-get="/api/dlstatus" hx-trigger="every 5s" hx-swap="innerHTML">
-  ${dlQueue.length?`<div class="bento-p"><div class="bento-b" style="padding:4px">${items}</div></div>`:`<div class="emp"><div class="emp-icon">${I.dl2}</div><div class="emp-t">${t("no_dl",lang)}</div></div>`
-  }</div><div class="mt12"><a href="/" class="btn btn-g btn-sm">${I.back} ${t("home",lang)}</a></div>`;
+  const doneCount = dlQueue.filter(x => x.status === 'done' || x.status === 'error' || x.status === 'cancelled').length;
+  return `<div class="flex aic jcb mb20">
+    <h2 style="font-size:1rem;font-weight:600;letter-spacing:-.01em">${t("dl",lang)} <span style="font-size:.75rem;color:var(--fg3);font-weight:400;font-family:var(--mono)">${dlQueue.length}</span></h2>
+    <div class="btn-grp">
+      ${doneCount > 0 ? `<button class="btn btn-g btn-sm" onclick="fetch('/api/dlclear',{method:'POST'}).then(()=>location.reload())">${t("clear",lang)}</button>` : ""}
+      <button class="btn btn-g btn-sm" onclick="location.reload()" style="font-size:.7rem;padding:5px 10px">↻ Refresh</button>
+    </div>
+  </div>
+  <div style="font-size:.7rem;color:var(--fg3);font-family:var(--mono);margin-bottom:14px">${t("dl_to",lang)}: ${DL_DIR}</div>
+  ${dlQueue.length ? `<div class="bento-p"><div class="bento-b">${items}</div></div>` : `<div class="emp"><div class="emp-icon">${I.dl2}</div><div class="emp-t">${t("no_dl",lang)}</div></div>`}
+  <div class="mt12"><a href="/" class="btn btn-g btn-sm">${I.back} ${t("home",lang)}</a></div>`;
 }
 
+// ─── Video player ───────────────────────────────────────────
+function playHTML(title: string, vid: string, url: string, q: string): string {
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>${esc(title)}</title><link rel="stylesheet" href="/styles.css"></head><body style="background:#000"><div class="ps" style="border-radius:0;margin:0"><video controls autoplay class="pv" style="max-height:100dvh"><source src="${esc(url)}" type="video/mp4"></video><div class="pb"><a href="/video/${vid}" class="btn btn-g btn-sm">${I.back}</a><span class="pt truncate">${esc(title)}</span><span class="pq">${q}</span><a href="${esc(url)}" target="_blank" class="btn btn-s btn-sm">${I.dl}</a></div></div></body></html>`;
+}
 
-// ─── 路由 ───────────────────────────────────────────────────
+// ─── Routes ─────────────────────────────────────────────────
 const app = new Elysia();
 app.get("/styles.css", () => Bun.file("src/styles.css"));
 
-app.get("/search", ({query:{q},headers})=>{
-  const s = (q||"").trim(); if(!s) return Response.redirect("/",302);
+// Search router
+app.get("/search", ({ query: { q }, headers }) => {
+  const s = (q || "").trim();
+  if (!s) return Response.redirect("/", 302);
   const ch = findChannel(s);
-  if (ch && ch.extractId) {
+  if (ch?.extractId) {
     const r = ch.extractId(s);
     if (r) {
-      if (r.type === "user") return Response.redirect(`/user/${r.id}/playlists`,302);
-      if (r.type === "playlist") return Response.redirect(`/playlist/${r.id}`,302);
-      return Response.redirect(`/video/${r.id}`,302);
+      if (r.type === "user") return Response.redirect(`/user/${r.id}/playlists`, 302);
+      if (r.type === "playlist") return Response.redirect(`/playlist/${r.id}`, 302);
+      return Response.redirect(`/video/${r.id}`, 302);
     }
   }
-  return Response.redirect(`/user/${encodeURIComponent(s)}/playlists`,302);
+  return Response.redirect(`/user/${encodeURIComponent(s)}/playlists`, 302);
 });
 
-app.get("/", ({headers})=>hx(homePage(gl(headers)),gl(headers),t("home",gl(headers)),"h",headers));
-app.get("/user/:id/playlists",async({params:{id},headers})=>{const l=gl(headers);const r=await getUserPlaylists(id);return hx(plPage(r.playlists||[],id,l),l,`${t("user",l)} ${id}`,"",headers);});
-app.get("/playlist/:id",async({params:{id},headers})=>{const l=gl(headers);const r=await getPlaylistVideos(id);return hx(plVideosPage(r.videos||[],id,l),l,`#${id}`,"",headers);});
-app.get("/user/:id/uploaded",async({params:{id},query:{page:ps},headers})=>{
-  const l=gl(headers);const p=Math.max(1,parseInt(ps||"1")||1);const ca=cget(id);
-  let av:string[],tc:number,tp:number;
-  if(ca){av=ca.v;tc=ca.c;tp=ca.p;}
-  else if(p===1){const r=await getUserUploaded(id,0);av=r.videos||[];tc=r.count||av.length;tp=r.pages||Math.ceil(tc/PER_PAGE)||1;cset(id,av,tc,tp);}
-  else{av=[];tc=0;tp=0;}
-  return hx(upPage(av.slice((p-1)*PER_PAGE,p*PER_PAGE),tc,p,tp,id,l),l,t("up",l),"",headers);
+// Pages
+app.get("/", ({ headers }) => hx(homePage(gl(headers)), gl(headers), t("home", gl(headers)), "h", headers));
+app.get("/user/:id/playlists", async ({ params: { id }, headers }) => {
+  const l = gl(headers);
+  const r = await getUserPlaylists(id);
+  return hx(plPage(r.playlists || [], id, l), l, `${t("user", l)} ${id}`, "", headers);
 });
-app.get("/video/:id",async({params:{id},headers})=>{const l=gl(headers);const info=await getVideoInfo(id);return hx(vdPage(info,l),l,info.title||`#${id}`,"",headers);});
-app.get("/downloads",({headers})=>{const l=gl(headers);return hx(dlPage(l),l,t("dl",l),"d",headers);});
+app.get("/playlist/:id", async ({ params: { id }, headers }) => {
+  const l = gl(headers);
+  const r = await getPlaylistVideos(id);
+  return hx(plVideosPage(r.videos || [], id, l), l, `#${id}`, "", headers);
+});
+app.get("/user/:id/uploaded", async ({ params: { id }, query: { page: ps }, headers }) => {
+  const l = gl(headers);
+  const p = Math.max(1, parseInt(ps || "1") || 1);
+  const ca = cget(id);
+  let av: string[], tc: number, tp: number;
+  if (ca) { av = ca.v; tc = ca.c; tp = ca.p; }
+  else if (p === 1) {
+    const r = await getUserUploaded(id, 0);
+    av = r.videos || []; tc = r.count || av.length; tp = r.pages || Math.ceil(tc / PER_PAGE) || 1;
+    cset(id, av, tc, tp);
+  }
+  else { av = []; tc = 0; tp = 0; }
+  return hx(upPage(av.slice((p - 1) * PER_PAGE, p * PER_PAGE), tc, p, tp, id, l), l, t("up", l), "", headers);
+});
+app.get("/video/:id", async ({ params: { id }, headers }) => {
+  const l = gl(headers);
+  const info = await getVideoInfo(id);
+  return hx(vdPage(info, l), l, info.title || `#${id}`, "", headers);
+});
+app.get("/downloads", ({ headers }) => {
+  const l = gl(headers);
+  return hx(dlPage(l), l, t("dl", l), "d", headers);
+});
 
-app.get("/api/cnt/:id",async({params:{id}})=>{const r=await getPlaylistVideos(id);return`${r.count||0}`;});
-app.get("/api/thumb/:id",async({params:{id}})=>{const i=await getVideoInfo(id);if(i.cover_url)return`<img src="${i.cover_url}" style="width:100%;height:100%;object-fit:cover" alt="">`;return`<span class="txs tmuted">#${id}</span>`;});
-app.get("/api/play/:id",async({params:{id},query:{quality}})=>{const q=quality||"720p";const i=await getVideoInfo(id);const qs=i.qualities||Object.keys(i.videos||{});const b=qs[qs.length-1]||"720p";const u=i.videos?.[q]||i.videos?.[b]||"";if(!u)return new Response("Unavailable",{status:404});return new Response(playHTML(i.title||`#${id}`,id,u,q),{headers:{"Content-Type":"text/html"}});});
-app.get("/api/dlurl/:id",async({params:{id},query:{quality}})=>{const q=quality||"720p";const r=await getDownloadUrl(id,q);if(r.url)return Response.redirect(r.url,302);return new Response("Failed",{status:404});});
+// DC pages
+app.get("/dc/video", ({ headers }) => {
+  const l = gl(headers);
+  return hx(dcPage("video", I.play, "green", t("dc_single", l), t("dc_single_desc", l), l, { quality: true }), l, t("dc_single", l), "cv", headers);
+});
+app.get("/dc/user", ({ headers }) => {
+  const l = gl(headers);
+  return hx(dcPage("user", I.usr, "yellow", t("dc_user", l), t("dc_user_desc", l), l, { quality: true }), l, t("dc_user", l), "cu", headers);
+});
 
-app.post("/api/dl/video/:id",async({params:{id}})=>{const i=await getVideoInfo(id);const t=addTask("hanime1","video",`${i.title||id} [video]`,id);return{id,label:t.label,status:t.status};});
-app.post("/api/dl/playlist/:id",async({params:{id}})=>{const r=await getPlaylistVideos(id);const t=addTask("hanime1","playlist",`Playlist #${id} (${r.count||0})`,id);return{id,label:t.label,status:t.status};});
-app.post("/api/dl/user/:id",async({params:{id}})=>{const t=addTask("hanime1","user",`User ${id} (all works)`,id);return{id,label:t.label,status:t.status};});
-app.post("/api/dlcancel/:id",({params:{id}})=>{return cancelTask(id)?{ok:true}:{error:"not found"};});
-app.post("/api/dlclear",()=>{clearDone();return{ok:true};});
-app.get("/api/dlstatus",()=>dlQueue);
-function playHTML(title:string,vid:string,url:string,q:string):string{
-  return`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>${esc(title)}</title><link rel="stylesheet" href="/styles.css"></head><body style="background:#000"><div class="ps" style="border-radius:0;margin:0"><video controls autoplay class="pv" style="max-height:100dvh"><source src="${esc(url)}" type="video/mp4"></video><div class="pb"><a href="/video/${vid}" class="btn btn-g btn-sm">${I.back}</a><span class="pt truncate">${esc(title)}</span><span class="pq">${q}</span><a href="${esc(url)}" target="_blank" class="btn btn-s btn-sm">${I.dl}</a></div></div></body></html>`;
-}
+// Preview APIs
+app.get("/api/dc/preview/video/:id", async ({ params: { id }, headers }) => {
+  const l = gl(headers);
+  const info = await getVideoInfo(id);
+  const q = info.qualities || Object.keys(info.videos || {});
+  if (!q.length) return new Response(`<div class="emp"><div class="emp-icon">${I.film}</div><div class="emp-t">${t("dc_no_result", l)}</div></div>`, { headers: { "Content-Type": "text/html" } });
+  return new Response(`<div class="bento-p" style="animation:scaleIn .3s var(--ease) both;overflow:visible">
+  <div class="bento-b" style="padding:24px">
+  <div class="dg">
+    <div class="dc"><img src="/api/cover/${id}" alt=""></div>
+    <div class="di">
+      <h1 class="dt">${esc(info.title)}</h1>
+      <div class="dm">#${info.video_id}</div>
+      <div class="dq">${q.map(qq => `<span class="qt">${qq}</span>`).join("")}</div>
+      <div class="da mt12">
+        <select class="inp" id="dc-q" style="width:90px"><option value="">720p</option><option>2160p</option><option>1080p</option><option selected>720p</option><option>480p</option><option>360p</option></select>
+        <button class="btn btn-p btn-sm" data-dl="video:${info.video_id}">${I.dl} ${t("dl_btn", l)}</button>
+        <a href="/video/${info.video_id}" class="btn btn-g btn-sm">${I.info} Detail</a>
+      </div>
+    </div>
+  </div></div></div>`, { headers: { "Content-Type": "text/html" } });
+});
+app.get("/api/dc/preview/user/:id", async ({ params: { id }, headers }) => {
+  const l = gl(headers);
+  const r = await getUserPlaylists(id);
+  const pls = r.playlists || [];
+  if (!pls.length) return new Response(`<div class="emp"><div class="emp-t">${t("dc_no_result", l)}</div></div>`, { headers: { "Content-Type": "text/html" } });
+  const phtml = pls.map(p => `<a href="/playlist/${p.id}" class="li"><div class="li-th" style="background:var(--accent-bg);color:var(--accent);font-family:var(--mono)">PL</div><div class="li-bd"><div class="li-t">${esc(p.title)}</div><div class="li-m">#${p.id}</div></div><div class="li-act">${I.ch}</div></a>`).join("");
+  return new Response(`<div class="bento-p" style="animation:scaleIn .3s var(--ease) both">
+  <div class="bento-h"><div class="bento-hl">${I.usr} ${l === 'zh' ? '用户' : 'User'} ${esc(id)}</div><div class="bento-count">${pls.length}</div></div>
+  <div style="padding:8px 16px;border-bottom:1px solid var(--bd)"><button class="btn btn-p btn-sm" data-dl="user:${id}">${I.dl} ${t("dl_works", l)} (${pls.length})</button></div>
+  <div class="bento-b stagger">${phtml}</div></div>`, { headers: { "Content-Type": "text/html" } });
+});
 
-const port=process.env.PORT?parseInt(process.env.PORT):PORT;
+// Cover proxy
+app.get("/api/cover/:id", async ({ params: { id } }) => {
+  const ENGINE = process.env.ENGINE_URL || "http://127.0.0.1:5001";
+  try {
+    const r = await fetch(ENGINE, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "cover", video_id: id }) });
+    if (!r.ok) return new Response("fail", { status: 502 });
+    return new Response(r.body, { headers: { "Content-Type": r.headers.get("Content-Type") || "image/jpeg", "Cache-Control": "public, max-age=86400" } });
+  } catch { return new Response("error", { status: 502 }); }
+});
+
+// Memory viewer + agentmemory proxy
+app.get("/memory", () => Bun.file("/Users/one/agentmemory-viewer-zh.html"));
+app.get("/api/am/health", async () => {
+  const r = await fetch("http://127.0.0.1:3111/agentmemory/health");
+  return new Response(r.body, { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
+});
+app.get("/api/am/memories", async () => {
+  const r = await fetch("http://127.0.0.1:3111/agentmemory/memories");
+  return new Response(r.body, { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
+});
+app.post("/api/am/smart-search", async ({ body }) => {
+  const r = await fetch("http://127.0.0.1:3111/agentmemory/smart-search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return new Response(r.body, { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
+});
+
+// Asset APIs
+app.get("/api/cnt/:id", async ({ params: { id } }) => {
+  const r = await getPlaylistVideos(id);
+  return `${r.count || 0}`;
+});
+app.get("/api/thumb/:id", async ({ params: { id } }) => {
+  const i = await getVideoInfo(id);
+  if (i.cover_url) return `<img src="${esc(i.cover_url)}" style="width:100%;height:100%;object-fit:cover" alt="">`;
+  return `<span style="font-size:.65rem;color:var(--fg3)">#${id}</span>`;
+});
+app.get("/api/play/:id", async ({ params: { id }, query: { quality } }) => {
+  const q = quality || "720p";
+  const i = await getVideoInfo(id);
+  const qs = i.qualities || Object.keys(i.videos || {});
+  const b = qs[qs.length - 1] || "720p";
+  const u = i.videos?.[q] || i.videos?.[b] || "";
+  if (!u) return new Response("Unavailable", { status: 404 });
+  return new Response(playHTML(i.title || `#${id}`, id, u, q), { headers: { "Content-Type": "text/html" } });
+});
+app.get("/api/dlurl/:id", async ({ params: { id }, query: { quality } }) => {
+  const q = quality || "720p";
+  const r = await getDownloadUrl(id, q);
+  if (r.url) return Response.redirect(r.url, 302);
+  return new Response("Failed", { status: 404 });
+});
+
+// Download APIs
+app.post("/api/dl/video/:id", async ({ params: { id } }) => {
+  const i = await getVideoInfo(id);
+  const t = addTask("hanime1", "video", `${i.title || id} [video]`, id);
+  return { id, label: t.label, status: t.status };
+});
+app.post("/api/dl/playlist/:id", async ({ params: { id } }) => {
+  const r = await getPlaylistVideos(id);
+  const t = addTask("hanime1", "playlist", `Playlist #${id} (${r.count || 0})`, id);
+  return { id, label: t.label, status: t.status };
+});
+app.post("/api/dl/user/:id", async ({ params: { id } }) => {
+  const t = addTask("hanime1", "user", `User ${id} (all works)`, id);
+  return { id, label: t.label, status: t.status };
+});
+app.post("/api/dlcancel/:id", ({ params: { id } }) => {
+  return cancelTask(id) ? { ok: true } : { error: "not found" };
+});
+app.post("/api/dlclear", () => { clearDone(); return { ok: true }; });
+app.get("/api/dlstatus", () => dlQueue);
+
+const port = process.env.PORT ? parseInt(process.env.PORT) : PORT;
 app.listen(port);
-console.log(`  ${APP} v3 at http://localhost:${port}`);
+console.log(`  ${APP} v4 at http://localhost:${port}`);
