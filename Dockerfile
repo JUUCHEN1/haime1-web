@@ -39,6 +39,7 @@ WORKDIR /app
 
 # 5. 复制应用文件
 COPY src/ /app/src/
+COPY supervisord.conf /app/
 COPY package.json /app/
 
 # 6. 安装 Node 依赖 (elysia)
