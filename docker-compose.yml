@@ -7,5 +7,10 @@ services:
       - "3280:3280"
     restart: unless-stopped
     environment:
-      - ENGINE_URL=http://127.0.0.1:5001
       - PORT=3280
+      - ENGINE_URL=http://127.0.0.1:5001
+      - ENGINE_PROXY=http://host.docker.internal:10808
+    volumes:
+      - ./downloads:/downloads
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

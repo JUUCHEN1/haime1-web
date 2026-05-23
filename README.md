@@ -82,8 +82,49 @@ Browser ──► :3280 (Bun + HTMX) ──► :5001 (Python engine) ──► :
 | `DL_DIR` | `~/Downloads/hanime` | Download output directory |
 | `ENGINE_PROXY` | — | Proxy for engine to reach hanime1.me |
 
-## Docker
+## Docker Compose
+
+### Prerequisites
+
+- Docker + Docker Compose
+- V2Ray proxy running on host at `127.0.0.1:10808` (to reach hanime1.me)
+
+### Deploy
 
 ```bash
-docker compose up -d
+# Clone
+git clone https://github.com/JUUCHEN1/haime1-web.git
+cd haime1-web
+
+# Build & start (detached)
+docker compose up -d --build
+
+# Check logs
+docker compose logs -f
+
+# Stop
+docker compose down
 ```
+
+Open `http://localhost:3280`
+
+### Volumes
+
+Downloads are saved to `./downloads` on the host (mounted to `/downloads` in container). Set `DL_DIR=/downloads` in docker-compose.yml to change.
+
+### Architecture (Docker)
+
+```
+Browser ──► :3280 (Bun) ──► :5001 (Python engine)
+                                │
+                                ▼
+                        host.docker.internal:10808 (V2Ray)
+                                │
+                                ▼
+                           hanime1.me
+```
+
+### Troubleshooting
+
+- **Engine can't reach hanime1.me**: ensure V2Ray is running on host port 10808. Check `ENGINE_PROXY=http://host.docker.internal:10808` in docker-compose.yml.
+- **Port conflict**: change `3280:3280` to e.g. `3281:3280` to use a different host port.
