@@ -21,6 +21,8 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin";
 const PASSWORD_FILE = join(process.cwd(), "admin-password.json");
 const PROXY_CONFIG_PATH = join(process.cwd(), "proxy-config.json");
 const RSS_SUBS_PATH = join(process.cwd(), "rss-subs.json");
+const RSS_CONFIG_PATH = join(process.cwd(), "rss-config.json");
+const DEFAULT_RSS_INTERVAL = 10800; // 3 hours
 const SESSION_SECRET = process.env.SESSION_SECRET || randomBytes(32).toString("hex");
 
 // Seed password file from env var on first boot (so web UI can mutate it later)
@@ -67,6 +69,15 @@ function loadProxy(): ProxyConfig {
 function saveProxy(cfg: ProxyConfig): void {
   writeFileSync(PROXY_CONFIG_PATH, JSON.stringify(cfg, null, 2));
 }
+// RSS config
+function loadRssConfig(): { interval_seconds: number } {
+  try { if (existsSync(RSS_CONFIG_PATH)) return JSON.parse(readFileSync(RSS_CONFIG_PATH, "utf-8")); } catch {}
+  return { interval_seconds: DEFAULT_RSS_INTERVAL };
+}
+function saveRssConfig(cfg: { interval_seconds: number }): void {
+  writeFileSync(RSS_CONFIG_PATH, JSON.stringify(cfg, null, 2));
+}
+
 function getEngineProxy(): string {
   const cfg = loadProxy();
   return cfg.socks5 || cfg.http || "";
@@ -210,6 +221,7 @@ function dcPage(type: string, icon: string, color: string, label: string, desc: 
 
 // ─── Home ───────────────────────────────────────────────────
 function homePage(lang: Lang): string {
+  const rssCfg = loadRssConfig();
   const running = dlQueue.filter(x => x.status === 'running').length;
   const done = dlQueue.filter(x => x.status === 'done').length;
   const queue = dlQueue.filter(x => x.status === 'queued').length;
@@ -249,14 +261,14 @@ function homePage(lang: Lang): string {
       <div class="bento-hl">${I.up} ${lang==='zh'?'订阅更新':'Subscription Updates'}</div>
       <a href="/rss" class="btn btn-g btn-xs" style="font-size:.6rem">${lang==='zh'?'管理':'Manage'}</a>
     </div>
-    <div class="bento-b stagger" id="rss-dash-items" hx-get="/api/rss/dashboard" hx-trigger="load" hx-swap="innerHTML">
+    <div class="bento-b stagger" id="rss-dash-items" hx-get="/api/rss/dashboard" hx-trigger="${rssCfg.interval_seconds > 0 ? `load, every ${rssCfg.interval_seconds}s` : 'load'}" hx-swap="innerHTML">
       <div class="emp"><div style="font-size:.7rem;color:var(--fg4)">${lang==='zh'?'加载中...':'Loading...'}</div></div>
     </div>
     <div style="padding:8px 16px;border-top:1px solid var(--bd)">
       <button class="btn btn-g btn-xs" style="font-size:.62rem" hx-get="/api/rss/dashboard" hx-target="#rss-dash-items" hx-swap="innerHTML">
         ↻ ${lang==='zh'?'刷新检查':'Refresh Check'}
       </button>
-      <span style="font-size:.6rem;color:var(--fg4);margin-left:8px;font-family:var(--mono)" id="rss-dash-time"></span>
+      <span style="font-size:.6rem;color:var(--fg4);margin-left:8px;font-family:var(--mono)" id="rss-dash-time">${rssCfg.interval_seconds > 0 ? `${lang==='zh'?'自动每':'Auto every'} ${rssCfg.interval_seconds >= 3600 ? rssCfg.interval_seconds/3600 + 'h' : rssCfg.interval_seconds + 's'}` : (lang==='zh'?'仅手动':'Manual only')}</span>
     </div>
   </div><div class="bento bento-31">
     <div class="bento-p">
@@ -420,6 +432,7 @@ function loginPage(lang: Lang, error?: string): string {
 // ─── Settings page ──────────────────────────────────────────
 function settingsPage(lang: Lang, saved?: boolean, pwdMsg?: string): string {
   const cfg = loadProxy();
+  const rssCfg = loadRssConfig();
   return `<div style="animation:scaleIn .35s var(--ease) both">
 <div class="bento-p mb20">
   <div class="bento-h"><div class="bento-hl">${I.zz} ${lang==='zh'?'代理设置':'Proxy Settings'}</div></div>
@@ -436,6 +449,27 @@ function settingsPage(lang: Lang, saved?: boolean, pwdMsg?: string): string {
       </div>
       <div style="font-size:.7rem;color:var(--fg4);margin-bottom:16px;line-height:1.5">${lang==='zh'?'留空则使用系统网络直连 hanime1.me。SOCKS5 优先于 HTTP。':'Leave empty to use system network (direct). SOCKS5 takes priority over HTTP.'}</div>
       <button type="submit" class="btn btn-p">${lang==='zh'?'保存配置':'Save Config'}</button>
+    </form>
+  </div>
+</div>
+<div class="bento-p mb20">
+  <div class="bento-h"><div class="bento-hl">${I.up} ${lang==='zh'?'RSS刷新间隔':'RSS Refresh Interval'}</div></div>
+  <div class="bento-b" style="padding:20px">
+    <form method="POST" action="/api/rss-interval">
+      <div style="margin-bottom:16px">
+        <label style="display:block;font-size:.72rem;color:var(--fg3);margin-bottom:6px;font-family:var(--mono);letter-spacing:.04em">${lang==='zh'?'自动检查间隔':'Auto-check interval'}</label>
+        <select name="interval" class="inp" style="width:100%">
+          <option value="3600"   \${rssCfg.interval_seconds===3600?'selected':''}>${lang==='zh'?'1 小时':'1 hour'}</option>
+          <option value="7200"   \${rssCfg.interval_seconds===7200?'selected':''}>${lang==='zh'?'2 小时':'2 hours'}</option>
+          <option value="10800"  \${rssCfg.interval_seconds===10800?'selected':''}>${lang==='zh'?'3 小时':'3 hours'}</option>
+          <option value="21600"  \${rssCfg.interval_seconds===21600?'selected':''}>${lang==='zh'?'6 小时':'6 hours'}</option>
+          <option value="43200"  \${rssCfg.interval_seconds===43200?'selected':''}>${lang==='zh'?'12 小时':'12 hours'}</option>
+          <option value="86400"  \${rssCfg.interval_seconds===86400?'selected':''}>${lang==='zh'?'24 小时':'24 hours'}</option>
+          <option value="0"      \${rssCfg.interval_seconds===0?'selected':''}>${lang==='zh'?'关闭自动刷新':'Disable auto-refresh'}</option>
+        </select>
+      </div>
+      <div style="font-size:.7rem;color:var(--fg4);margin-bottom:16px;line-height:1.5">${lang==='zh'?'首页仪表盘将按此间隔自动检查。设为 0 可关闭自动刷新。':'Dashboard auto-checks at this interval. Set 0 to disable.'}</div>
+      <button type="submit" class="btn btn-p">${lang==='zh'?'保存':'Save'}</button>
     </form>
   </div>
 </div>
@@ -562,7 +596,17 @@ app.post("/api/password", async ({ body, headers }) => {
   return hx(settingsPage(l, false, l === 'zh' ? '密码已更新' : 'Password updated'), l, l === 'zh' ? '设置' : 'Settings', "s", headers);
 });
 
-// RSS dashboard API — checks all subscriptions
+// Save RSS interval
+app.post("/api/rss-interval", async ({ body, headers }) => {
+  if (!isAuthed(headers)) return Response.redirect("/login", 302);
+  const l = gl(headers);
+  const raw = body as any;
+  const interval = Math.max(0, parseInt(String(raw?.interval || "10800")) || 10800);
+  saveRssConfig({ interval_seconds: interval });
+  return hx(settingsPage(l, true), l, l === 'zh' ? '设置' : 'Settings', "s", headers);
+});
+
+// RSS dashboard API// RSS dashboard API — checks all subscriptions
 app.get("/api/rss/dashboard", async ({ headers }) => {
   if (!isAuthed(headers)) return new Response("", { headers: { "Content-Type": "text/html" } });
   const l = gl(headers);
