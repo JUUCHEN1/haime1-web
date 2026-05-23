@@ -249,8 +249,14 @@ function homePage(lang: Lang): string {
       <div class="bento-hl">${I.up} ${lang==='zh'?'订阅更新':'Subscription Updates'}</div>
       <a href="/rss" class="btn btn-g btn-xs" style="font-size:.6rem">${lang==='zh'?'管理':'Manage'}</a>
     </div>
-    <div class="bento-b stagger" id="rss-dash-items" hx-get="/api/rss/dashboard" hx-trigger="load, every 120s" hx-swap="innerHTML">
+    <div class="bento-b stagger" id="rss-dash-items" hx-get="/api/rss/dashboard" hx-trigger="load" hx-swap="innerHTML">
       <div class="emp"><div style="font-size:.7rem;color:var(--fg4)">${lang==='zh'?'加载中...':'Loading...'}</div></div>
+    </div>
+    <div style="padding:8px 16px;border-top:1px solid var(--bd)">
+      <button class="btn btn-g btn-xs" style="font-size:.62rem" hx-get="/api/rss/dashboard" hx-target="#rss-dash-items" hx-swap="innerHTML">
+        ↻ ${lang==='zh'?'刷新检查':'Refresh Check'}
+      </button>
+      <span style="font-size:.6rem;color:var(--fg4);margin-left:8px;font-family:var(--mono)" id="rss-dash-time"></span>
     </div>
   </div><div class="bento bento-31">
     <div class="bento-p">
