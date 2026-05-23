@@ -551,6 +551,7 @@ app.get("/dc/user", ({ headers }) => {
 app.get("/api/dc/preview/video/:id", async ({ params: { id }, headers }) => {
   const l = gl(headers);
   const info = await getVideoInfo(id);
+  if (info.error) return new Response(`<div class="emp"><div class="emp-icon">${I.no}</div><div class="emp-t">${t("dc_no_result", l)}</div><div class="emp-d" style="font-family:var(--mono);font-size:.65rem;opacity:.6;margin-top:8px">${esc(info.error)}</div></div>`, { headers: { "Content-Type": "text/html" } });
   const q = info.qualities || Object.keys(info.videos || {});
   if (!q.length) return new Response(`<div class="emp"><div class="emp-icon">${I.film}</div><div class="emp-t">${t("dc_no_result", l)}</div></div>`, { headers: { "Content-Type": "text/html" } });
   return new Response(`<div class="bento-p" style="animation:scaleIn .3s var(--ease) both;overflow:visible">

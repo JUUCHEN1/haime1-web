@@ -69,6 +69,9 @@ def create_scraper():
     proxy_url = _load_proxy_url()
     if proxy_url:
         s.proxies = {"http": proxy_url, "https": proxy_url}
+        print(f"[engine] using proxy: {proxy_url}", file=sys.stderr, flush=True)
+    else:
+        print("[engine] using direct connection (no proxy configured)", file=sys.stderr, flush=True)
     return s
 
 
@@ -127,8 +130,10 @@ def action_playlist_videos(scraper, playlist_id: str):
 
 def action_video_info(scraper, video_id: str):
     url = f"{BASE_URL}/download?v={video_id}"
+    print(f"[engine] fetching {url}", file=sys.stderr, flush=True)
     for i in range(MAX_RETRIES):
         r = scraper.get(url, timeout=30)
+        print(f"[engine]   attempt {i+1}: status={r.status_code} len={len(r.text)}", file=sys.stderr, flush=True)
         if r.status_code == 200:
             title_match = re.search(r'<h3[^>]*>(.*?)</h3>', r.text, re.DOTALL)
             title = title_match.group(1).strip() if title_match else f"video_{video_id}"
@@ -159,7 +164,8 @@ def action_video_info(scraper, video_id: str):
         else:
             if i < MAX_RETRIES - 1:
                 time.sleep(RETRY_DELAY)
-    return {"error": "failed to fetch", "video_id": video_id}
+    print(f"[engine] FAILED to fetch {url} after {MAX_RETRIES} retries", file=sys.stderr, flush=True)
+    return {"error": f"failed to fetch after {MAX_RETRIES} retries", "video_id": video_id}
 
 
 def action_user_uploaded(scraper, user_id: str, page=1):
@@ -223,6 +229,7 @@ class EngineHandler(BaseHTTPRequestHandler):
 
         action = request.get("action", "")
         result = {"action": action}
+        print(f"[engine] {action} id={request.get('video_id') or request.get('user_id') or request.get('playlist_id')}", file=sys.stderr, flush=True)
         try:
             if action == "user_playlists":
                 result.update(action_user_playlists(self.scraper, request.get("user_id", "")))
