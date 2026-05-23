@@ -14,7 +14,6 @@ import sys
 import time
 import warnings
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from pathlib import Path
 
 import cloudscraper
 
@@ -25,27 +24,6 @@ RETRY_DELAY = 3
 BASE_URL = "https://hanime1.me"
 
 
-def _get_proxy():
-    """Read proxy from proxy-config.json or env vars."""
-    for p in [Path(__file__).resolve().parent.parent / "proxy-config.json", Path.cwd() / "proxy-config.json"]:
-        if p.exists():
-            try:
-                cfg = json.loads(open(p).read())
-                socks5 = (cfg.get("socks5") or "").strip()
-                if socks5:
-                    return socks5
-                http = (cfg.get("http") or "").strip()
-                if http:
-                    return http
-            except Exception:
-                pass
-    for key in ("ENGINE_PROXY", "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
-        val = os.environ.get(key, "").strip()
-        if val:
-            return val
-    return ""
-
-
 def create_scraper():
     s = cloudscraper.create_scraper()
     s.headers.update({
@@ -53,12 +31,6 @@ def create_scraper():
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.5",
     })
-    proxy = _get_proxy()
-    if proxy:
-        s.proxies = {"http": proxy, "https": proxy}
-        print(f"[engine] proxy: {proxy}", file=sys.stderr, flush=True)
-    else:
-        print("[engine] direct connection", file=sys.stderr, flush=True)
     return s
 
 
@@ -89,9 +61,7 @@ def extract_video_ids(html: str) -> list[str]:
 
 def action_user_playlists(scraper, user_id: str):
     url = f"{BASE_URL}/user/{user_id}/playlists"
-    print(f"[engine] fetching {url}", file=sys.stderr, flush=True)
     r = scraper.get(url, timeout=30)
-    print(f"[engine]   status={r.status_code} len={len(r.text)}", file=sys.stderr, flush=True)
     if r.status_code != 200:
         return {"error": f"HTTP {r.status_code}", "playlists": []}
     playlist_ids = sorted(set(re.findall(
@@ -106,7 +76,6 @@ def action_user_playlists(scraper, user_id: str):
 
 def action_playlist_videos(scraper, playlist_id: str):
     url = f"{BASE_URL}/playlist?list={playlist_id}"
-    print(f"[engine] fetching {url}", file=sys.stderr, flush=True)
     for i in range(MAX_RETRIES):
         r = scraper.get(url, timeout=30)
         if r.status_code == 200:
@@ -120,10 +89,8 @@ def action_playlist_videos(scraper, playlist_id: str):
 
 def action_video_info(scraper, video_id: str):
     url = f"{BASE_URL}/download?v={video_id}"
-    print(f"[engine] fetching {url}", file=sys.stderr, flush=True)
     for i in range(MAX_RETRIES):
         r = scraper.get(url, timeout=30)
-        print(f"[engine]   attempt {i+1}: status={r.status_code} len={len(r.text)}", file=sys.stderr, flush=True)
         if r.status_code == 200:
             title_match = re.search(r'<h3[^>]*>(.*?)</h3>', r.text, re.DOTALL)
             title = title_match.group(1).strip() if title_match else f"video_{video_id}"
@@ -154,7 +121,7 @@ def action_video_info(scraper, video_id: str):
         else:
             if i < MAX_RETRIES - 1:
                 time.sleep(RETRY_DELAY)
-    return {"error": f"failed to fetch after {MAX_RETRIES} retries", "video_id": video_id}
+    return {"error": "failed to fetch", "video_id": video_id}
 
 
 def action_user_uploaded(scraper, user_id: str, page=1):
@@ -218,8 +185,6 @@ class EngineHandler(BaseHTTPRequestHandler):
 
         action = request.get("action", "")
         result = {"action": action}
-        vid = request.get('video_id') or request.get('user_id') or request.get('playlist_id') or ''
-        print(f"[engine] {action} id={vid}", file=sys.stderr, flush=True)
         try:
             if action == "user_playlists":
                 result.update(action_user_playlists(self.scraper, request.get("user_id", "")))
@@ -261,7 +226,7 @@ class EngineHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def log_message(self, format, *args):
-        sys.stderr.write(f"[engine] {args[0] if len(args)>0 else '?'} {args[1] if len(args)>1 else '?'} {args[2] if len(args)>2 else '?'}\n")
+        sys.stderr.write(f"[engine] {args[0]} {args[1]} {args[2]}\n")
 
 
 def main():
