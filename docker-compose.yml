@@ -9,8 +9,10 @@ services:
     environment:
       - PORT=3280
       - ENGINE_URL=http://127.0.0.1:5001
-      - ENGINE_PROXY=http://host.docker.internal:10808
+      - ADMIN_PASSWORD=admin
+      - SESSION_SECRET=change-me-in-production
     volumes:
       - ./downloads:/downloads
+      - ./proxy-config.json:/app/proxy-config.json
     extra_hosts:
       - "host.docker.internal:host-gateway"
