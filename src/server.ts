@@ -406,7 +406,7 @@ function settingsPage(lang: Lang, saved?: boolean, pwdMsg?: string): string {
   <div class="bento-h"><div class="bento-hl">${I.zz} ${lang==='zh'?'代理设置':'Proxy Settings'}</div></div>
   <div class="bento-b" style="padding:20px">
     ${saved ? `<div style="background:var(--green-dim);color:var(--green);padding:10px 16px;border-radius:var(--r-sm);font-size:.75rem;margin-bottom:16px;border:1px solid var(--green);font-family:var(--mono)">${lang==='zh'?'已保存。引擎将在下次请求时使用新代理。':'Saved. Engine will use new proxy on next request.'}</div>` : ""}
-    <form method="POST" action="/api/proxy">
+    <form hx-post="/api/proxy" hx-target="#main-body" hx-swap="innerHTML">
       <div style="margin-bottom:16px">
         <label style="display:block;font-size:.72rem;color:var(--fg3);margin-bottom:6px;font-family:var(--mono);letter-spacing:.04em">HTTP Proxy</label>
         <input name="http" class="inp" placeholder="http://127.0.0.1:10808" value="${esc(cfg.http)}">
@@ -504,10 +504,9 @@ app.get("/settings", ({ headers }) => {
   return hx(settingsPage(l), l, l === 'zh' ? '设置' : 'Settings', "s", headers);
 });
 app.post("/api/proxy", async ({ body, headers }) => {
-  if (!isAuthed(headers)) return Response.redirect("/login", 302);
   const l = gl(headers);
-  const raw = body as any;
-  saveProxy({ http: String(raw?.http || "").trim(), socks5: String(raw?.socks5 || "").trim() });
+  const raw = body instanceof FormData ? Object.fromEntries(body as unknown as Iterable<[string, FormDataEntryValue]>) : (body as Record<string, unknown> | undefined);
+  saveProxy({ http: String((raw as any)?.http || "").trim(), socks5: String((raw as any)?.socks5 || "").trim() });
   return hx(settingsPage(l, true), l, l === 'zh' ? '设置' : 'Settings', "s", headers);
 });
 

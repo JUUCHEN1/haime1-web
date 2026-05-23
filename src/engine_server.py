@@ -62,6 +62,7 @@ def extract_video_ids(html: str) -> list[str]:
 def action_user_playlists(scraper, user_id: str):
     url = f"{BASE_URL}/user/{user_id}/playlists"
     r = scraper.get(url, timeout=30)
+    print(f"[engine] user_playlists {user_id}: HTTP {r.status_code} len={len(r.text)}", file=sys.stderr, flush=True)
     if r.status_code != 200:
         return {"error": f"HTTP {r.status_code}", "playlists": []}
     playlist_ids = sorted(set(re.findall(
@@ -91,6 +92,7 @@ def action_video_info(scraper, video_id: str):
     url = f"{BASE_URL}/download?v={video_id}"
     for i in range(MAX_RETRIES):
         r = scraper.get(url, timeout=30)
+        print(f"[engine] video_info {video_id} attempt {i+1}: HTTP {r.status_code} len={len(r.text)}", file=sys.stderr, flush=True)
         if r.status_code == 200:
             title_match = re.search(r'<h3[^>]*>(.*?)</h3>', r.text, re.DOTALL)
             title = title_match.group(1).strip() if title_match else f"video_{video_id}"
@@ -188,6 +190,13 @@ class EngineHandler(BaseHTTPRequestHandler):
         try:
             if action == "user_playlists":
                 result.update(action_user_playlists(self.scraper, request.get("user_id", "")))
+            elif action == "health":
+                try:
+                    r = self.scraper.get(f"{BASE_URL}/", timeout=15)
+                    result["status"] = f"HTTP {r.status_code}"
+                    result["body_len"] = len(r.text)
+                except Exception as e:
+                    result["status"] = f"error: {e}"
             elif action == "playlist_videos":
                 result.update(action_playlist_videos(self.scraper, request.get("playlist_id", "")))
             elif action == "video_info":
@@ -232,7 +241,7 @@ class EngineHandler(BaseHTTPRequestHandler):
 def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5001
     server = HTTPServer(("0.0.0.0", port), EngineHandler)
-    print(f"[engine] HTTP engine ready on port {port}", flush=True)
+    print(f"[engine] HTTP engine ready on port {port} (cloudscraper {cloudscraper.__version__})", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

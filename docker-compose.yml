@@ -2,7 +2,8 @@ services:
   hanime-web:
     build: .
     container_name: hanime-web
-    network_mode: host
+    ports:
+      - "3280:3280"
     restart: unless-stopped
     environment:
       - PORT=3280

@@ -20,7 +20,7 @@ ENV BUN_RUNTIME=/usr/local/bin/bun
 FROM python:3.12-slim AS python-base
 
 # 安装 Python 依赖
-RUN pip install --no-cache-dir cloudscraper
+RUN pip install --no-cache-dir cloudscraper==1.2.60
 
 # ─── Stage 3: 合并 ─────────────────────────────────────────
 FROM python:3.12-slim
@@ -28,9 +28,13 @@ FROM python:3.12-slim
 # 1. 从 Bun 镜像复制 bun 二进制
 COPY --from=bun-base /usr/local/bin/bun /usr/local/bin/bun
 
-# 2. 安装系统依赖 + Python 依赖 (cloudscraper)
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir cloudscraper
+# 2. 安装系统依赖 + Python 依赖 (cloudscraper + TLS支持)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
+    libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
+    libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir cloudscraper==1.2.60
 
 # 3. 安装 supervisord
 RUN pip install --no-cache-dir supervisor
