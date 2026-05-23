@@ -16,7 +16,9 @@ import warnings
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
-import cloudscraper
+import requests
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 warnings.filterwarnings("ignore")
 
@@ -59,13 +61,17 @@ def _load_proxy_url() -> str:
     return ""
 
 
-def create_scraper():
-    s = cloudscraper.create_scraper()
+UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3497.81 Safari/537.36"
+
+def create_session():
+    s = requests.Session()
     s.headers.update({
-        "Referer": f"{BASE_URL}/",
+        "User-Agent": UA,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.5",
+        "Accept-Charset": "UTF-8,*;q=0.5",
     })
+    s.verify = False
     proxy_url = _load_proxy_url()
     if proxy_url:
         s.proxies = {"http": proxy_url, "https": proxy_url}
@@ -100,9 +106,9 @@ def extract_video_ids(html: str) -> list[str]:
     return sorted(ids)
 
 
-def action_user_playlists(scraper, user_id: str):
+def action_user_playlists(session, user_id: str):
     url = f"{BASE_URL}/user/{user_id}/playlists"
-    r = scraper.get(url, timeout=30)
+    r = session.get(url, timeout=30)
     if r.status_code != 200:
         return {"error": f"HTTP {r.status_code}", "playlists": []}
     playlist_ids = sorted(set(re.findall(
@@ -115,10 +121,10 @@ def action_user_playlists(scraper, user_id: str):
     return {"playlists": playlists, "total": len(playlists)}
 
 
-def action_playlist_videos(scraper, playlist_id: str):
+def action_playlist_videos(session, playlist_id: str):
     url = f"{BASE_URL}/playlist?list={playlist_id}"
     for i in range(MAX_RETRIES):
-        r = scraper.get(url, timeout=30)
+        r = session.get(url, timeout=30)
         if r.status_code == 200:
             ids = extract_video_ids(r.text)
             if not ids and len(r.text) < 30000 and i < MAX_RETRIES - 1:
@@ -128,11 +134,11 @@ def action_playlist_videos(scraper, playlist_id: str):
     return {"playlist_id": playlist_id, "videos": [], "count": 0, "error": "failed after retries"}
 
 
-def action_video_info(scraper, video_id: str):
+def action_video_info(session, video_id: str):
     url = f"{BASE_URL}/download?v={video_id}"
     print(f"[engine] fetching {url}", file=sys.stderr, flush=True)
     for i in range(MAX_RETRIES):
-        r = scraper.get(url, timeout=30)
+        r = session.get(url, timeout=30)
         print(f"[engine]   attempt {i+1}: status={r.status_code} len={len(r.text)}", file=sys.stderr, flush=True)
         if r.status_code == 200:
             title_match = re.search(r'<h3[^>]*>(.*?)</h3>', r.text, re.DOTALL)
@@ -168,7 +174,7 @@ def action_video_info(scraper, video_id: str):
     return {"error": f"failed to fetch after {MAX_RETRIES} retries", "video_id": video_id}
 
 
-def action_user_uploaded(scraper, user_id: str, page=1):
+def action_user_uploaded(session, user_id: str, page=1):
     fetch_all = (page == 0 or str(page) in ("0", "all"))
     page_num = 1 if fetch_all else int(page)
     if fetch_all:
@@ -177,7 +183,7 @@ def action_user_uploaded(scraper, user_id: str, page=1):
             url = f"{BASE_URL}/user/{user_id}/uploaded"
             if page_num > 1:
                 url += f"?page={page_num}"
-            r = scraper.get(url, timeout=30)
+            r = session.get(url, timeout=30)
             if r.status_code != 200:
                 break
             ids = set(re.findall(r'href="https://hanime1\.me/watch\?v=(\d+)"', r.text))
@@ -191,15 +197,15 @@ def action_user_uploaded(scraper, user_id: str, page=1):
         url = f"{BASE_URL}/user/{user_id}/uploaded"
         if page_num > 1:
             url += f"?page={page_num}"
-        r = scraper.get(url, timeout=30)
+        r = session.get(url, timeout=30)
         if r.status_code != 200:
             return {"user_id": user_id, "videos": [], "count": 0, "page": page_num, "error": f"HTTP {r.status_code}"}
         ids = sorted(set(re.findall(r'href="https://hanime1\.me/watch\?v=(\d+)"', r.text)))
         return {"user_id": user_id, "videos": ids, "count": len(ids), "page": page_num}
 
 
-def action_download_url(scraper, video_id: str, quality: str = "1080p"):
-    info = action_video_info(scraper, video_id)
+def action_download_url(session, video_id: str, quality: str = "1080p"):
+    info = action_video_info(session, video_id)
     if "error" in info:
         return {"error": info["error"]}
     dl_url = info["videos"].get(quality)
@@ -216,7 +222,7 @@ def action_download_url(scraper, video_id: str, quality: str = "1080p"):
 
 
 class EngineHandler(BaseHTTPRequestHandler):
-    scraper = create_scraper()
+    scraper = create_session()
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
@@ -232,18 +238,18 @@ class EngineHandler(BaseHTTPRequestHandler):
         print(f"[engine] {action} id={request.get('video_id') or request.get('user_id') or request.get('playlist_id')}", file=sys.stderr, flush=True)
         try:
             if action == "user_playlists":
-                result.update(action_user_playlists(self.scraper, request.get("user_id", "")))
+                result.update(action_user_playlists(self.session, request.get("user_id", "")))
             elif action == "playlist_videos":
-                result.update(action_playlist_videos(self.scraper, request.get("playlist_id", "")))
+                result.update(action_playlist_videos(self.session, request.get("playlist_id", "")))
             elif action == "video_info":
-                result.update(action_video_info(self.scraper, request.get("video_id", "")))
+                result.update(action_video_info(self.session, request.get("video_id", "")))
             elif action == "user_uploaded":
-                result.update(action_user_uploaded(self.scraper, request.get("user_id", ""), request.get("page", 1)))
+                result.update(action_user_uploaded(self.session, request.get("user_id", ""), request.get("page", 1)))
             elif action == "cover":
                 video_id = request.get("video_id", "")
-                info = action_video_info(self.scraper, video_id)
+                info = action_video_info(self.session, video_id)
                 if info.get("cover_url"):
-                    r = self.scraper.get(info["cover_url"], headers={"Referer": f"{BASE_URL}/"})
+                    r = self.session.get(info["cover_url"], headers={"Referer": f"{BASE_URL}/"})
                     if r.status_code == 200:
                         self.send_response(200)
                         self.send_header("Content-Type", r.headers.get("Content-Type", "image/jpeg"))
@@ -254,7 +260,7 @@ class EngineHandler(BaseHTTPRequestHandler):
                         return
                 result["error"] = "cover not found"
             elif action == "download_url":
-                result.update(action_download_url(self.scraper, request.get("video_id", ""), request.get("quality", "1080p")))
+                result.update(action_download_url(self.session, request.get("video_id", ""), request.get("quality", "1080p")))
             else:
                 result["error"] = f"unknown action: {action}"
         except Exception as e:
