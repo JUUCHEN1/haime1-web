@@ -16,50 +16,29 @@ import warnings
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
-import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-warnings.filterwarnings("ignore")
+import cloudscraper
 
-# Try curl_cffi first (bypasses Cloudflare), fall back to requests
-try:
-    from curl_cffi import requests as http_requests
-    _CURL_CFFI = True
-except ImportError:
-    import requests as http_requests
-    _CURL_CFFI = False
+warnings.filterwarnings("ignore")
 
 MAX_RETRIES = 5
 RETRY_DELAY = 3
 BASE_URL = "https://hanime1.me"
 
 
-def _find_proxy_config() -> str:
-    """Locate proxy-config.json relative to this file or cwd."""
-    candidates = [
-        Path(__file__).resolve().parent.parent / "proxy-config.json",
-        Path.cwd() / "proxy-config.json",
-    ]
-    for p in candidates:
+def _get_proxy():
+    """Read proxy from proxy-config.json or env vars."""
+    for p in [Path(__file__).resolve().parent.parent / "proxy-config.json", Path.cwd() / "proxy-config.json"]:
         if p.exists():
-            return str(p)
-    return ""
-
-
-def _load_proxy_url() -> str:
-    """Resolve proxy URL: proxy-config.json → env vars → direct (empty)."""
-    cfg_path = _find_proxy_config()
-    if cfg_path:
-        try:
-            cfg = json.loads(open(cfg_path).read())
-            socks5 = (cfg.get("socks5") or "").strip()
-            if socks5:
-                return socks5
-            http = (cfg.get("http") or "").strip()
-            if http:
-                return http
-        except Exception:
-            pass
-    # Fallback to env vars
+            try:
+                cfg = json.loads(open(p).read())
+                socks5 = (cfg.get("socks5") or "").strip()
+                if socks5:
+                    return socks5
+                http = (cfg.get("http") or "").strip()
+                if http:
+                    return http
+            except Exception:
+                pass
     for key in ("ENGINE_PROXY", "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
         val = os.environ.get(key, "").strip()
         if val:
@@ -67,51 +46,19 @@ def _load_proxy_url() -> str:
     return ""
 
 
-UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-
-class SessionWrapper:
-    """Wraps curl_cffi or requests Session with a uniform interface."""
-    def __init__(self):
-        self.proxy = None
-        self._headers = {
-            "User-Agent": UA,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-            "Accept-Charset": "UTF-8,*;q=0.5",
-            "Cache-Control": "no-cache",
-            "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120"',
-            "Sec-Ch-Ua-Mobile": "?0",
-            "Sec-Ch-Ua-Platform": '"Windows"',
-        }
-        self._use_cffi = _CURL_CFFI
-        if _CURL_CFFI:
-            print("[engine] using curl_cffi (Chrome 120 impersonation)", file=sys.stderr, flush=True)
-        else:
-            print("[engine] using plain requests (no impersonation)", file=sys.stderr, flush=True)
-
-    def get(self, url, timeout=30, **kw):
-        proxy_url = _load_proxy_url()
-        headers = {**self._headers, **(kw.pop("headers", {}) or {})}
-        if _CURL_CFFI:
-            kwargs = {"impersonate": "chrome120", "headers": headers, "timeout": timeout}
-            if proxy_url:
-                kwargs["proxy"] = proxy_url
-            kwargs.update(kw)
-            return http_requests.get(url, **kwargs)
-        else:
-            kwargs = {"headers": headers, "timeout": timeout, "verify": False}
-            if proxy_url:
-                kwargs["proxies"] = {"http": proxy_url, "https": proxy_url}
-            kwargs.update(kw)
-            return http_requests.get(url, **kwargs)
-
-def create_session():
-    s = SessionWrapper()
-    proxy_url = _load_proxy_url()
-    if proxy_url:
-        print(f"[engine] using proxy: {proxy_url}", file=sys.stderr, flush=True)
+def create_scraper():
+    s = cloudscraper.create_scraper()
+    s.headers.update({
+        "Referer": f"{BASE_URL}/",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+    })
+    proxy = _get_proxy()
+    if proxy:
+        s.proxies = {"http": proxy, "https": proxy}
+        print(f"[engine] proxy: {proxy}", file=sys.stderr, flush=True)
     else:
-        print("[engine] using direct connection (no proxy configured)", file=sys.stderr, flush=True)
+        print("[engine] direct connection", file=sys.stderr, flush=True)
     return s
 
 
@@ -140,9 +87,11 @@ def extract_video_ids(html: str) -> list[str]:
     return sorted(ids)
 
 
-def action_user_playlists(session, user_id: str):
+def action_user_playlists(scraper, user_id: str):
     url = f"{BASE_URL}/user/{user_id}/playlists"
-    r = session.get(url, timeout=30)
+    print(f"[engine] fetching {url}", file=sys.stderr, flush=True)
+    r = scraper.get(url, timeout=30)
+    print(f"[engine]   status={r.status_code} len={len(r.text)}", file=sys.stderr, flush=True)
     if r.status_code != 200:
         return {"error": f"HTTP {r.status_code}", "playlists": []}
     playlist_ids = sorted(set(re.findall(
@@ -155,10 +104,11 @@ def action_user_playlists(session, user_id: str):
     return {"playlists": playlists, "total": len(playlists)}
 
 
-def action_playlist_videos(session, playlist_id: str):
+def action_playlist_videos(scraper, playlist_id: str):
     url = f"{BASE_URL}/playlist?list={playlist_id}"
+    print(f"[engine] fetching {url}", file=sys.stderr, flush=True)
     for i in range(MAX_RETRIES):
-        r = session.get(url, timeout=30)
+        r = scraper.get(url, timeout=30)
         if r.status_code == 200:
             ids = extract_video_ids(r.text)
             if not ids and len(r.text) < 30000 and i < MAX_RETRIES - 1:
@@ -168,11 +118,11 @@ def action_playlist_videos(session, playlist_id: str):
     return {"playlist_id": playlist_id, "videos": [], "count": 0, "error": "failed after retries"}
 
 
-def action_video_info(session, video_id: str):
+def action_video_info(scraper, video_id: str):
     url = f"{BASE_URL}/download?v={video_id}"
     print(f"[engine] fetching {url}", file=sys.stderr, flush=True)
     for i in range(MAX_RETRIES):
-        r = session.get(url, timeout=30)
+        r = scraper.get(url, timeout=30)
         print(f"[engine]   attempt {i+1}: status={r.status_code} len={len(r.text)}", file=sys.stderr, flush=True)
         if r.status_code == 200:
             title_match = re.search(r'<h3[^>]*>(.*?)</h3>', r.text, re.DOTALL)
@@ -204,11 +154,10 @@ def action_video_info(session, video_id: str):
         else:
             if i < MAX_RETRIES - 1:
                 time.sleep(RETRY_DELAY)
-    print(f"[engine] FAILED to fetch {url} after {MAX_RETRIES} retries", file=sys.stderr, flush=True)
     return {"error": f"failed to fetch after {MAX_RETRIES} retries", "video_id": video_id}
 
 
-def action_user_uploaded(session, user_id: str, page=1):
+def action_user_uploaded(scraper, user_id: str, page=1):
     fetch_all = (page == 0 or str(page) in ("0", "all"))
     page_num = 1 if fetch_all else int(page)
     if fetch_all:
@@ -217,7 +166,7 @@ def action_user_uploaded(session, user_id: str, page=1):
             url = f"{BASE_URL}/user/{user_id}/uploaded"
             if page_num > 1:
                 url += f"?page={page_num}"
-            r = session.get(url, timeout=30)
+            r = scraper.get(url, timeout=30)
             if r.status_code != 200:
                 break
             ids = set(re.findall(r'href="https://hanime1\.me/watch\?v=(\d+)"', r.text))
@@ -231,15 +180,15 @@ def action_user_uploaded(session, user_id: str, page=1):
         url = f"{BASE_URL}/user/{user_id}/uploaded"
         if page_num > 1:
             url += f"?page={page_num}"
-        r = session.get(url, timeout=30)
+        r = scraper.get(url, timeout=30)
         if r.status_code != 200:
             return {"user_id": user_id, "videos": [], "count": 0, "page": page_num, "error": f"HTTP {r.status_code}"}
         ids = sorted(set(re.findall(r'href="https://hanime1\.me/watch\?v=(\d+)"', r.text)))
         return {"user_id": user_id, "videos": ids, "count": len(ids), "page": page_num}
 
 
-def action_download_url(session, video_id: str, quality: str = "1080p"):
-    info = action_video_info(session, video_id)
+def action_download_url(scraper, video_id: str, quality: str = "1080p"):
+    info = action_video_info(scraper, video_id)
     if "error" in info:
         return {"error": info["error"]}
     dl_url = info["videos"].get(quality)
@@ -256,7 +205,7 @@ def action_download_url(session, video_id: str, quality: str = "1080p"):
 
 
 class EngineHandler(BaseHTTPRequestHandler):
-    scraper = create_session()
+    scraper = create_scraper()
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
@@ -269,21 +218,22 @@ class EngineHandler(BaseHTTPRequestHandler):
 
         action = request.get("action", "")
         result = {"action": action}
-        print(f"[engine] {action} id={request.get('video_id') or request.get('user_id') or request.get('playlist_id')}", file=sys.stderr, flush=True)
+        vid = request.get('video_id') or request.get('user_id') or request.get('playlist_id') or ''
+        print(f"[engine] {action} id={vid}", file=sys.stderr, flush=True)
         try:
             if action == "user_playlists":
-                result.update(action_user_playlists(self.session, request.get("user_id", "")))
+                result.update(action_user_playlists(self.scraper, request.get("user_id", "")))
             elif action == "playlist_videos":
-                result.update(action_playlist_videos(self.session, request.get("playlist_id", "")))
+                result.update(action_playlist_videos(self.scraper, request.get("playlist_id", "")))
             elif action == "video_info":
-                result.update(action_video_info(self.session, request.get("video_id", "")))
+                result.update(action_video_info(self.scraper, request.get("video_id", "")))
             elif action == "user_uploaded":
-                result.update(action_user_uploaded(self.session, request.get("user_id", ""), request.get("page", 1)))
+                result.update(action_user_uploaded(self.scraper, request.get("user_id", ""), request.get("page", 1)))
             elif action == "cover":
                 video_id = request.get("video_id", "")
-                info = action_video_info(self.session, video_id)
+                info = action_video_info(self.scraper, video_id)
                 if info.get("cover_url"):
-                    r = self.session.get(info["cover_url"], headers={"Referer": f"{BASE_URL}/"})
+                    r = self.scraper.get(info["cover_url"], headers={"Referer": f"{BASE_URL}/"})
                     if r.status_code == 200:
                         self.send_response(200)
                         self.send_header("Content-Type", r.headers.get("Content-Type", "image/jpeg"))
@@ -294,7 +244,7 @@ class EngineHandler(BaseHTTPRequestHandler):
                         return
                 result["error"] = "cover not found"
             elif action == "download_url":
-                result.update(action_download_url(self.session, request.get("video_id", ""), request.get("quality", "1080p")))
+                result.update(action_download_url(self.scraper, request.get("video_id", ""), request.get("quality", "1080p")))
             else:
                 result["error"] = f"unknown action: {action}"
         except Exception as e:
@@ -311,10 +261,7 @@ class EngineHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def log_message(self, format, *args):
-        try:
-            sys.stderr.write(f"[engine] {args[0] if len(args)>0 else '?'} {args[1] if len(args)>1 else '?'} {args[2] if len(args)>2 else '?'}\n")
-        except:
-            pass
+        sys.stderr.write(f"[engine] {args[0] if len(args)>0 else '?'} {args[1] if len(args)>1 else '?'} {args[2] if len(args)>2 else '?'}\n")
 
 
 def main():
