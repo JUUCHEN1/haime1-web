@@ -6,4 +6,5 @@ node_modules/
 dist/
 admin-password.json
 proxy-config.json
+rss-subs.json
 downloads/

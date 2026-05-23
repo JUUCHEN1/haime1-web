@@ -20,6 +20,7 @@ const DL_DIR = process.env.DL_DIR || join(process.env.HOME || "/tmp", "Downloads
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin";
 const PASSWORD_FILE = join(process.cwd(), "admin-password.json");
 const PROXY_CONFIG_PATH = join(process.cwd(), "proxy-config.json");
+const RSS_SUBS_PATH = join(process.cwd(), "rss-subs.json");
 const SESSION_SECRET = process.env.SESSION_SECRET || randomBytes(32).toString("hex");
 
 // Seed password file from env var on first boot (so web UI can mutate it later)
@@ -77,6 +78,23 @@ const CACHE_TTL = 5 * 60 * 1000;
 function cget(k: string) { const x = cache.get(k); if (x && Date.now() - x.t < CACHE_TTL) return x; return null; }
 function cset(k: string, v: string[], c: number, p: number) { cache.set(k, { v, c, p, t: Date.now() }); }
 
+// ─── RSS Subscriptions ──────────────────────────────────────
+interface RssSub { user_id: string; name: string; last_count: number; added_at: number; }
+function loadRss(): RssSub[] {
+  try { if (existsSync(RSS_SUBS_PATH)) return JSON.parse(readFileSync(RSS_SUBS_PATH, "utf-8")); } catch {}
+  return [];
+}
+function saveRss(subs: RssSub[]): void {
+  writeFileSync(RSS_SUBS_PATH, JSON.stringify(subs, null, 2));
+}
+async function checkRssSub(sub: RssSub): Promise<{ new_count: number; new_videos: number; name: string }> {
+  const r = await getUserUploaded(sub.user_id, 0);
+  const vids = r.videos || [];
+  const cnt = r.count || vids.length;
+  const name = sub.name && sub.name !== sub.user_id ? sub.name : (vids.length ? `User ${sub.user_id}` : sub.user_id);
+  return { new_count: cnt, new_videos: Math.max(0, cnt - sub.last_count), name };
+}
+
 // ─── i18n ───────────────────────────────────────────────────
 type Lang = "zh" | "en";
 function gl(h?: Record<string, string | undefined>): Lang {
@@ -100,6 +118,10 @@ const T: Record<string, string> = {
   pl_v:"个视频| videos",about:"浏览和下载 hanime1.me 视频。输入用户ID查看内容，支持单视频/播放列表/作者三种下载模式。|Browse and download hanime1.me videos. Enter a user ID to browse. Supports single, playlist, and author downloads.",
   unavailable:"视频不可用|Video unavailable",no_info:"无信息|No info",
   searching:"搜索中...|Searching...",result:"结果|Results",
+  rss:"RSS订阅|RSS Subs",rss_desc:"监控作者更新，有新作品时显示提醒|Monitor authors for new uploads",
+  rss_add:"添加订阅|Add Sub",rss_check:"检查更新|Check",rss_remove:"取消订阅|Remove",
+  rss_new:"新|NEW",rss_total:"共|Total",rss_none:"暂无订阅|No subscriptions",
+  rss_checking:"检查中...|Checking...",rss_updated:"有新内容|New content",
   usearch:"搜索里番|Search H-anime",usearch_desc:"输入视频/用户链接或ID，自动识别|Enter video/user link or ID, auto-detect",
 };
 function t(k: string, lang: Lang): string { const x = T[k]; return x ? x.split("|")[lang === "zh" ? 0 : 1] : k; }
@@ -144,6 +166,7 @@ function shell(title: string, body: string, nav: string, lang: Lang): Response {
 <a href="/dc/search" class="side-link${nav==='cs'?' active':''}">${I.srch}<span>${t("usearch",lang)}</span></a>
 <div class="side-section">${t("quick",lang)}</div>
 <a href="/downloads" class="side-link${nav==='d'?' active':''}" hx-get="/downloads" hx-target="#main-body" hx-push-url="true">${I.dl2}<span>${t("dl",lang)}</span></a>
+<a href="/rss" class="side-link${nav==='rs'?' active':''}" hx-get="/rss" hx-target="#main-body" hx-push-url="true">${I.up}<span>${t("rss",lang)}</span></a>
 <div class="side-section">System</div>
 <a href="/settings" class="side-link${nav==='s'?' active':''}">${I.zz}<span>${lang==='zh'?'设置':'Settings'}</span></a>
 <a href="/api/logout" class="side-link">${I.back}<span>${lang==='zh'?'登出':'Logout'}</span></a>
@@ -153,6 +176,7 @@ function shell(title: string, body: string, nav: string, lang: Lang): Response {
 <nav class="mobile-nav">
   <a href="/" class="${nav==='h'?'active':''}">${I.home}<span>${t("home",lang)}</span></a>
   <a href="/dc/search" class="${nav==='cs'?'active':''}" hx-get="/dc/search" hx-target="#main-body" hx-push-url="true">${I.srch}<span>${t("usearch",lang)}</span></a>
+  <a href="/rss" class="${nav==='rs'?'active':''}" hx-get="/rss" hx-target="#main-body" hx-push-url="true">${I.up}<span>${t("rss",lang)}</span></a>
   <a href="/downloads" class="${nav==='d'?'active':''}" hx-get="/downloads" hx-target="#main-body" hx-push-url="true">${I.dl2}<span>${t("dl",lang)}</span></a>
   <a href="/settings" class="${nav==='s'?'active':''}" hx-get="/settings" hx-target="#main-body" hx-push-url="true">${I.zz}<span>${lang==='zh'?'设置':'Settings'}</span></a>
 </nav>
@@ -418,6 +442,40 @@ function settingsPage(lang: Lang, saved?: boolean, pwdMsg?: string): string {
   </div>
 </div></div>`;
 }
+// ─── RSS page ──────────────────────────────────────────────
+function rssPage(lang: Lang, subs: RssSub[], msg?: string): string {
+  const items = subs.map((s, i) => {
+    const delta = s.last_count > 0 && (i as any) !== undefined ? '' : '';
+    return `<div class="li" style="animation:slideUp .3s var(--ease) both;animation-delay:${i*40}ms">
+      <div class="li-th" style="background:var(--accent-dim);color:var(--accent);font-family:var(--mono);font-size:.65rem">RSS</div>
+      <div class="li-bd">
+        <div class="li-t">${esc(s.name || s.user_id)}</div>
+        <div class="li-m">#${s.user_id} · ${lang==='zh'?'共':'Total'} ${s.last_count} ${lang==='zh'?'部':'videos'}</div>
+      </div>
+      <div class="li-act" style="display:flex;gap:4px">
+        <button class="btn btn-xs btn-p" hx-post="/api/rss/check/${s.user_id}" hx-target="#rss-body" hx-indicator="closest .li">${lang==='zh'?'检查':'Check'}</button>
+        <button class="btn btn-xs btn-g" hx-post="/api/rss/remove/${s.user_id}" hx-target="#rss-body" style="color:var(--accent);border-color:var(--accent-dim)">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+  return `<div style="animation:scaleIn .35s var(--ease) both">
+<div class="bento-p mb20">
+  <div class="bento-h"><div class="bento-hl">${I.dl2} ${t("rss",lang)}</div></div>
+  <div class="bento-b" style="padding:18px">
+    <div style="font-size:.78rem;color:var(--fg3);margin-bottom:14px;line-height:1.6">${t("rss_desc",lang)}</div>
+    <form id="rss-form" hx-post="/api/rss/add" hx-target="#rss-body" hx-swap="innerHTML" style="display:flex;gap:8px">
+      <input name="user_id" class="inp" placeholder="${lang==='zh'?'输入用户 ID':'Enter user ID'}" style="flex:1">
+      <button type="submit" class="btn btn-p">${I.up} ${t("rss_add",lang)}</button>
+    </form>
+  </div>
+</div>
+${msg ? `<div style="background:var(--green-dim);color:var(--green);padding:10px 16px;border-radius:var(--r-sm);font-size:.75rem;margin-bottom:14px;border:1px solid var(--green);font-family:var(--mono)">${msg}</div>` : ''}
+<div id="rss-body">
+  ${subs.length ? `<div class="bento-p"><div class="bento-b stagger">${items}</div></div>` : `<div class="emp"><div class="emp-icon">${I.dl2}</div><div class="emp-t">${t("rss_none",lang)}</div></div>`}
+</div></div>`;
+}
+
+
 // ─── Routes ─────────────────────────────────────────────────
 const app = new Elysia();
 app.get("/styles.css", () => Bun.file("src/styles.css"));
@@ -472,6 +530,57 @@ app.post("/api/password", async ({ body, headers }) => {
   }
   setPassword(newPwd);
   return hx(settingsPage(l, false, l === 'zh' ? '密码已更新' : 'Password updated'), l, l === 'zh' ? '设置' : 'Settings', "s", headers);
+});
+
+// RSS subscriptions
+app.get("/rss", ({ headers }) => {
+  if (!isAuthed(headers)) return Response.redirect("/login", 302);
+  const l = gl(headers);
+  return hx(rssPage(l, loadRss()), l, t("rss", l), "rs", headers);
+});
+app.post("/api/rss/add", async ({ body, headers }) => {
+  if (!isAuthed(headers)) return Response.redirect("/login", 302);
+  const l = gl(headers);
+  const raw = body as any;
+  const uid = String(raw?.user_id || "").trim().replace(/[^0-9]/g, "");
+  if (!uid) return new Response(rssPage(l, loadRss()), { headers: { "Content-Type": "text/html" } });
+  const subs = loadRss();
+  if (subs.find(s => s.user_id === uid)) {
+    return new Response(rssPage(l, subs, l === 'zh' ? '已订阅该作者' : 'Already subscribed'), { headers: { "Content-Type": "text/html" } });
+  }
+  // Fetch initial count to get name and baseline
+  const r = await getUserUploaded(uid, 0);
+  const count = r.count || (r.videos || []).length;
+  const name = (r as any).user_id ? `User ${uid}` : uid;
+  subs.push({ user_id: uid, name, last_count: count, added_at: Date.now() });
+  saveRss(subs);
+  return new Response(rssPage(l, subs, l === 'zh' ? `已添加 #${uid}，当前 ${count} 部作品` : `Added #${uid}, ${count} videos`), { headers: { "Content-Type": "text/html" } });
+});
+app.post("/api/rss/check/:id", async ({ params: { id }, headers }) => {
+  if (!isAuthed(headers)) return Response.redirect("/login", 302);
+  const l = gl(headers);
+  const subs = loadRss();
+  const idx = subs.findIndex(s => s.user_id === id);
+  if (idx < 0) return new Response(rssPage(l, subs), { headers: { "Content-Type": "text/html" } });
+  const r = await getUserUploaded(id, 0);
+  const count = r.count || (r.videos || []).length;
+  const delta = count - subs[idx].last_count;
+  subs[idx].last_count = count;
+  if (r.videos && r.videos.length > 0 && !subs[idx].name.startsWith('User ')) {
+    // Name update via first playlist — keep existing name for now
+  }
+  saveRss(subs);
+  const msg = delta > 0
+    ? (l === 'zh' ? `#${id} 有 ${delta} 部新作品！` : `#${id} has ${delta} new videos!`)
+    : (l === 'zh' ? `#${id} 暂无更新` : `#${id} no updates`);
+  return new Response(rssPage(l, subs, msg), { headers: { "Content-Type": "text/html" } });
+});
+app.post("/api/rss/remove/:id", async ({ params: { id }, headers }) => {
+  if (!isAuthed(headers)) return Response.redirect("/login", 302);
+  const l = gl(headers);
+  const subs = loadRss().filter(s => s.user_id !== id);
+  saveRss(subs);
+  return new Response(rssPage(l, subs, l === 'zh' ? `已取消订阅 #${id}` : `Unsubscribed #${id}`), { headers: { "Content-Type": "text/html" } });
 });
 
 // Search router
