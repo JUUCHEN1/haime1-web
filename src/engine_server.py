@@ -16,11 +16,17 @@ import warnings
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
-import requests
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
 warnings.filterwarnings("ignore")
+
+# Try curl_cffi first (bypasses Cloudflare), fall back to requests
+try:
+    from curl_cffi import requests as http_requests
+    _CURL_CFFI = True
+except ImportError:
+    import requests as http_requests
+    _CURL_CFFI = False
 
 MAX_RETRIES = 5
 RETRY_DELAY = 3
@@ -61,20 +67,48 @@ def _load_proxy_url() -> str:
     return ""
 
 
-UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3497.81 Safari/537.36"
+UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+class SessionWrapper:
+    """Wraps curl_cffi or requests Session with a uniform interface."""
+    def __init__(self):
+        self.proxy = None
+        self._headers = {
+            "User-Agent": UA,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Charset": "UTF-8,*;q=0.5",
+            "Cache-Control": "no-cache",
+            "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Windows"',
+        }
+        self._use_cffi = _CURL_CFFI
+        if _CURL_CFFI:
+            print("[engine] using curl_cffi (Chrome 120 impersonation)", file=sys.stderr, flush=True)
+        else:
+            print("[engine] using plain requests (no impersonation)", file=sys.stderr, flush=True)
+
+    def get(self, url, timeout=30, **kw):
+        proxy_url = _load_proxy_url()
+        headers = {**self._headers, **(kw.pop("headers", {}) or {})}
+        if _CURL_CFFI:
+            kwargs = {"impersonate": "chrome120", "headers": headers, "timeout": timeout}
+            if proxy_url:
+                kwargs["proxy"] = proxy_url
+            kwargs.update(kw)
+            return http_requests.get(url, **kwargs)
+        else:
+            kwargs = {"headers": headers, "timeout": timeout, "verify": False}
+            if proxy_url:
+                kwargs["proxies"] = {"http": proxy_url, "https": proxy_url}
+            kwargs.update(kw)
+            return http_requests.get(url, **kwargs)
 
 def create_session():
-    s = requests.Session()
-    s.headers.update({
-        "User-Agent": UA,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Accept-Charset": "UTF-8,*;q=0.5",
-    })
-    s.verify = False
+    s = SessionWrapper()
     proxy_url = _load_proxy_url()
     if proxy_url:
-        s.proxies = {"http": proxy_url, "https": proxy_url}
         print(f"[engine] using proxy: {proxy_url}", file=sys.stderr, flush=True)
     else:
         print("[engine] using direct connection (no proxy configured)", file=sys.stderr, flush=True)

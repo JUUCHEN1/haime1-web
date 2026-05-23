@@ -20,7 +20,7 @@ ENV BUN_RUNTIME=/usr/local/bin/bun
 FROM python:3.12-slim AS python-base
 
 # 安装 Python 依赖
-RUN pip install --no-cache-dir requests
+RUN pip install --no-cache-dir curl_cffi requests
 
 # ─── Stage 3: 合并 ─────────────────────────────────────────
 FROM python:3.12-slim
@@ -29,7 +29,7 @@ FROM python:3.12-slim
 COPY --from=bun-base /usr/local/bin/bun /usr/local/bin/bun
 
 # 2. 安装 Python 依赖 (requests)
-RUN pip install --no-cache-dir requests
+RUN pip install --no-cache-dir curl_cffi requests
 
 # 3. 安装 supervisord
 RUN pip install --no-cache-dir supervisor
