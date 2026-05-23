@@ -122,7 +122,6 @@ const T: Record<string, string> = {
   rss_add:"添加订阅|Add Sub",rss_check:"检查更新|Check",rss_remove:"取消订阅|Remove",
   rss_new:"新|NEW",rss_total:"共|Total",rss_none:"暂无订阅|No subscriptions",
   rss_checking:"检查中...|Checking...",rss_updated:"有新内容|New content",
-  usearch:"搜索里番|Search H-anime",usearch_desc:"输入视频/用户链接或ID，自动识别|Enter video/user link or ID, auto-detect",
 };
 function t(k: string, lang: Lang): string { const x = T[k]; return x ? x.split("|")[lang === "zh" ? 0 : 1] : k; }
 function esc(s: string): string { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;"); }
@@ -153,7 +152,7 @@ const I = {
 // ─── Client JS ──────────────────────────────────────────────
 const i18nJS = (lang: Lang) => `<script>var _l='${lang}';function setLang(l){document.cookie='lang='+l+';path=/;max-age=31536000';localStorage.setItem('lang',l);location.reload()}
 document.addEventListener('click',function(e){var b=e.target.closest('[data-dl]');if(!b)return;var d=b.getAttribute('data-dl').split(':');(function(){var q='';var s=document.getElementById('dc-q');if(s)q=s.value;return fetch('/api/dl/'+d[0]+'/'+d[1]+(q?'?quality='+q:''),{method:'POST'})})().then(function(r){return r.json()}).then(function(t){var s=document.getElementById('dl-s');if(s)s.textContent=_l==='en'?'Queued: '+t.label:'已加入: '+t.label;setTimeout(function(){location.reload()},800)}).catch(function(){})});
-function unifiedSearch(){var inp=document.getElementById('dc-inp');var raw=(inp&&inp.value||'').trim();if(!raw){alert(_l==='zh'?'请输入URL或ID':'Enter URL or ID');return}var id=raw;var m=raw.match(/v=([0-9]+)/);if(m){id=m[1]}else{var p=raw.split('/user/');if(p.length>1)id=p[p.length-1];else id=String(raw).replace(/[^0-9]/g,'')}if(!id){alert(_l==='zh'?'无法识别ID':'Cannot recognize ID');return}var btn=document.getElementById('dc-preview-btn');var pre=document.getElementById('dc-preview');if(btn){btn.disabled=true;btn.textContent='...'}if(pre)pre.innerHTML='<div class="emp"><div class="skel skel-t" style="margin:0 auto"></div><div class="skel skel-m" style="margin:8px auto 0;width:30%"></div></div>';fetch('/api/dc/preview/unified/'+id).then(function(r){return r.text()}).then(function(html){if(pre)pre.innerHTML=html;if(btn){btn.disabled=false;btn.textContent=_l==='zh'?'查看':'Preview'}}).catch(function(e){if(pre)pre.innerHTML='<div class="emp"><div class="emp-t">Error</div><div class="emp-d">'+(e.message||e)+'</div></div>';if(btn){btn.disabled=false;btn.textContent=_l==='zh'?'查看':'Preview'}})}</script>`;
+function dcPreview(type){var inp=document.getElementById('dc-inp');var raw=(inp&&inp.value||'').trim();if(!raw){alert(_l==='zh'?'请输入URL或ID':'Enter URL or ID');return;}var id=raw;var m;if(type==='video'){m=raw.match(/v=([0-9]+)/);id=m?m[1]:raw;}else if(type==='user'){var p=raw.split('/user/');id=p[p.length-1]||raw;}id=String(id).replace(/[^0-9]/g,'');if(!id){alert(_l==='zh'?'无法识别ID':'Cannot recognize ID');return;}var btn=document.getElementById('dc-preview-btn');var pre=document.getElementById('dc-preview');if(btn){btn.disabled=true;btn.textContent='...';}if(pre)pre.innerHTML='<div class="emp"><div class="skel skel-t" style="margin:0 auto"></div><div class="skel skel-m" style="margin:8px auto 0;width:30%"></div></div>';fetch('/api/dc/preview/'+type+'/'+id).then(function(r){return r.text()}).then(function(html){if(pre)pre.innerHTML=html;if(btn){btn.disabled=false;btn.textContent=_l==='zh'?'查看':'Preview';}}).catch(function(e){if(pre)pre.innerHTML='<div class="emp"><div class="emp-t">Error</div><div class="emp-d">'+(e.message||e)+'</div></div>';if(btn){btn.disabled=false;btn.textContent=_l==='zh'?'查看':'Preview';}});}</script>`;
 
 // ─── Shell ──────────────────────────────────────────────────
 function shell(title: string, body: string, nav: string, lang: Lang): Response {
@@ -163,10 +162,11 @@ function shell(title: string, body: string, nav: string, lang: Lang): Response {
 <div class="side-nav">
 <a href="/" class="side-link${nav==='h'?' active':''}">${I.home}<span>${t("home",lang)}</span></a>
 <div class="side-section">${t("dc",lang)}</div>
-<a href="/dc/search" class="side-link${nav==='cs'?' active':''}">${I.srch}<span>${t("usearch",lang)}</span></a>
+<a href="/dc/video" class="side-link${nav==='cv'?' active':''}">${I.film}<span>${t("dc_single",lang)}</span></a>
+<a href="/dc/user" class="side-link${nav==='cu'?' active':''}">${I.usr}<span>${t("dc_user",lang)}</span></a>
 <div class="side-section">${t("quick",lang)}</div>
-<a href="/downloads" class="side-link${nav==='d'?' active':''}" hx-get="/downloads" hx-target="#main-body" hx-push-url="true">${I.dl2}<span>${t("dl",lang)}</span></a>
-<a href="/rss" class="side-link${nav==='rs'?' active':''}" hx-get="/rss" hx-target="#main-body" hx-push-url="true">${I.up}<span>${t("rss",lang)}</span></a>
+<a href="/downloads" class="side-link${nav==='d'?' active':''}">${I.dl2}<span>${t("dl",lang)}</span></a>
+<a href="/rss" class="side-link${nav==='rs'?' active':''}">${I.up}<span>${t("rss",lang)}</span></a>
 <div class="side-section">System</div>
 <a href="/settings" class="side-link${nav==='s'?' active':''}">${I.zz}<span>${lang==='zh'?'设置':'Settings'}</span></a>
 <a href="/api/logout" class="side-link">${I.back}<span>${lang==='zh'?'登出':'Logout'}</span></a>
@@ -175,10 +175,10 @@ function shell(title: string, body: string, nav: string, lang: Lang): Response {
 <div class="main-body" id="main-body">${body}</div></div>
 <nav class="mobile-nav">
   <a href="/" class="${nav==='h'?'active':''}">${I.home}<span>${t("home",lang)}</span></a>
-  <a href="/dc/search" class="${nav==='cs'?'active':''}" hx-get="/dc/search" hx-target="#main-body" hx-push-url="true">${I.srch}<span>${t("usearch",lang)}</span></a>
-  <a href="/rss" class="${nav==='rs'?'active':''}" hx-get="/rss" hx-target="#main-body" hx-push-url="true">${I.up}<span>${t("rss",lang)}</span></a>
-  <a href="/downloads" class="${nav==='d'?'active':''}" hx-get="/downloads" hx-target="#main-body" hx-push-url="true">${I.dl2}<span>${t("dl",lang)}</span></a>
-  <a href="/settings" class="${nav==='s'?'active':''}" hx-get="/settings" hx-target="#main-body" hx-push-url="true">${I.zz}<span>${lang==='zh'?'设置':'Settings'}</span></a>
+  <a href="/dc/video" class="${nav==='cv'?'active':''}" hx-get="/dc/video" hx-target="#main-body" hx-push-url="true">${I.film}<span>${t("dc_single",lang)}</span></a>
+  <a href="/rss" class="${nav==='rs'?'active':''}">${I.up}<span>${t("rss",lang)}</span></a>
+  <a href="/downloads" class="${nav==='d'?'active':''}">${I.dl2}<span>${t("dl",lang)}</span></a>
+  <a href="/settings" class="${nav==='s'?'active':''}">${I.zz}<span>${lang==='zh'?'设置':'Settings'}</span></a>
 </nav>
 </div></body></html>`,{headers:{"Content-Type":"text/html; charset=utf-8","Set-Cookie":`lang=${lang};path=/;max-age=31536000`}});
 }
@@ -200,8 +200,8 @@ function dcPage(type: string, icon: string, color: string, label: string, desc: 
   <div class="bento-b" style="padding:18px">
     <div style="font-size:.78rem;color:var(--fg3);margin-bottom:14px;line-height:1.6">${desc}</div>
     <div class="dc-bar">
-      <input id="dc-inp" class="inp" placeholder="${ts("dc_input_ph",lang)}" onkeydown="if(event.key==='Enter'){event.preventDefault();unifiedSearch()}">
-      <button id="dc-preview-btn" class="btn btn-p" onclick="unifiedSearch()">${I.srch} ${t("dc_preview",lang)}</button>
+      <input id="dc-inp" class="inp" placeholder="${ts("dc_input_ph",lang)}" onkeydown="if(event.key==='Enter'){event.preventDefault();dcPreview('${type}')}">
+      <button id="dc-preview-btn" class="btn btn-p" onclick="dcPreview('${type}')">${I.srch} ${t("dc_preview",lang)}</button>
     </div>
   </div>
 </div>
@@ -247,7 +247,7 @@ function homePage(lang: Lang): string {
     <div class="bento-p">
       <div class="bento-h"><div class="bento-hl">${I.grid} ${t("quick",lang)}</div></div>
       <div class="bento-b stagger">
-        <a href="/dc/search" class="li"><div class="li-th" style="background:var(--accent-dim);color:var(--accent);font-family:var(--mono)">DC</div><div class="li-bd"><div class="li-t">${t("usearch",lang)}</div><div class="li-m">URL / ID → ${t("dc_preview",lang)} → Download</div></div><div class="li-act">${I.ch}</div></a>
+        <a href="/dc/video" class="li"><div class="li-th" style="background:var(--green-dim);color:var(--green);font-family:var(--mono)">DC</div><div class="li-bd"><div class="li-t">${t("dc_single",lang)}</div><div class="li-m">URL / ID → ${t("dc_preview",lang)} → Download</div></div><div class="li-act">${I.ch}</div></a>
         <a href="/downloads" class="li" hx-get="/downloads" hx-target="#main-body" hx-push-url="true"><div class="li-th" style="background:var(--blue-dim);color:var(--blue)">DL</div><div class="li-bd"><div class="li-t">${t("dl",lang)}</div><div class="li-m">${running} ${t("dl_run",lang)} · ${done} ${t("dl_done",lang)}</div></div><div class="li-act">${I.ch}</div></a>
         <div class="li" style="cursor:default"><div class="li-th" style="background:var(--accent-dim);color:var(--accent);font-family:var(--mono)">#1</div><div class="li-bd"><div class="li-t">${t("dl_to",lang)}</div><div class="li-m" style="font-family:var(--mono)">${DL_DIR}</div></div></div>
       </div>
@@ -648,56 +648,17 @@ app.get("/downloads", ({ headers }) => {
   return hx(dlPage(l), l, t("dl", l), "d", headers);
 });
 
-// DC unified search
-app.get("/dc/search", ({ headers }) => {
+// DC pages
+app.get("/dc/video", ({ headers }) => {
   const l = gl(headers);
-  return hx(dcPage("search", I.srch, "accent", t("usearch", l), t("usearch_desc", l), l), l, t("usearch", l), "cs", headers);
+  return hx(dcPage("video", I.play, "green", t("dc_single", l), t("dc_single_desc", l), l), l, t("dc_single", l), "cv", headers);
+});
+app.get("/dc/user", ({ headers }) => {
+  const l = gl(headers);
+  return hx(dcPage("user", I.usr, "yellow", t("dc_user", l), t("dc_user_desc", l), l), l, t("dc_user", l), "cu", headers);
 });
 
-// Unified preview — fetches both video and user results
-app.get("/api/dc/preview/unified/:id", async ({ params: { id }, headers }) => {
-  const l = gl(headers);
-  const [info, userR] = await Promise.all([getVideoInfo(id), getUserPlaylists(id)]);
-  const parts: string[] = [];
-  // Video result
-  if (!info.error) {
-    const q = info.qualities || Object.keys(info.videos || {});
-    if (q.length) {
-      parts.push(`<div class="bento-p" style="animation:scaleIn .3s var(--ease) both;overflow:visible;margin-bottom:14px">
-  <div class="bento-h"><div class="bento-hl">${I.play} ${l==='zh'?'单视频':'Video'} #${esc(id)}</div></div>
-  <div class="bento-b" style="padding:24px">
-  <div class="dg">
-    <div class="dc"><img src="/api/cover/${id}" alt=""></div>
-    <div class="di">
-      <h1 class="dt">${esc(info.title)}</h1>
-      <div class="dm">#${info.video_id}</div>
-      <div class="dq">${q.map(qq => `<span class="qt">${qq}</span>`).join("")}</div>
-      <div class="da mt12">
-        <select class="inp" id="dc-q" style="width:90px"><option value="">720p</option><option>2160p</option><option>1080p</option><option selected>720p</option><option>480p</option><option>360p</option></select>
-        <button class="btn btn-p btn-sm" data-dl="video:${info.video_id}">${I.dl} ${t("dl_btn", l)}</button>
-        <a href="/video/${info.video_id}" class="btn btn-g btn-sm">${I.info} Detail</a>
-      </div>
-    </div>
-  </div></div></div>`);
-    }
-  }
-  // User result
-  const pls = userR.playlists || [];
-  if (pls.length) {
-    const phtml = pls.map(p => `<a href="/playlist/${p.id}" class="li"><div class="li-th" style="background:var(--accent-bg);color:var(--accent);font-family:var(--mono)">PL</div><div class="li-bd"><div class="li-t">${esc(p.title)}</div><div class="li-m">#${p.id}</div></div><div class="li-act">${I.ch}</div></a>`).join("");
-    parts.push(`<div class="bento-p" style="animation:scaleIn .3s var(--ease) both">
-  <div class="bento-h"><div class="bento-hl">${I.usr} ${l === 'zh' ? '用户' : 'User'} ${esc(id)}</div><div class="bento-count">${pls.length}</div></div>
-  <div style="padding:8px 16px;border-bottom:1px solid var(--bd)"><button class="btn btn-p btn-sm" data-dl="user:${id}">${I.dl} ${t("dl_works", l)} (${pls.length})</button></div>
-  <div class="bento-b stagger">${phtml}</div></div>`);
-  }
-  if (!parts.length) {
-    const errMsg = info.error || userR.error || '';
-    return new Response(`<div class="emp"><div class="emp-icon">${I.no}</div><div class="emp-t">${t("dc_no_result", l)}</div>${errMsg ? `<div class="emp-d" style="font-family:var(--mono);font-size:.65rem;opacity:.6;margin-top:8px">${esc(errMsg)}</div>` : ''}</div>`, { headers: { "Content-Type": "text/html" } });
-  }
-  return new Response(parts.join(''), { headers: { "Content-Type": "text/html" } });
-});
-
-// legacy preview (keep for backward compat)
+// Preview APIs
 app.get("/api/dc/preview/video/:id", async ({ params: { id }, headers }) => {
   const l = gl(headers);
   const info = await getVideoInfo(id);
