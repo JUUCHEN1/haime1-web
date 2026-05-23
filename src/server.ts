@@ -243,7 +243,16 @@ function homePage(lang: Lang): string {
       <div class="st-label">${t("dl_err",lang)}</div>
     </div>
   </div>
-  <div class="bento bento-31">
+  
+  <div id="rss-dashboard" class="bento-p mb20" style="animation:scaleIn .35s var(--ease) both;animation-delay:200ms">
+    <div class="bento-h">
+      <div class="bento-hl">${I.up} ${lang==='zh'?'订阅更新':'Subscription Updates'}</div>
+      <a href="/rss" class="btn btn-g btn-xs" style="font-size:.6rem">${lang==='zh'?'管理':'Manage'}</a>
+    </div>
+    <div class="bento-b stagger" id="rss-dash-items" hx-get="/api/rss/dashboard" hx-trigger="load, every 120s" hx-swap="innerHTML">
+      <div class="emp"><div style="font-size:.7rem;color:var(--fg4)">${lang==='zh'?'加载中...':'Loading...'}</div></div>
+    </div>
+  </div><div class="bento bento-31">
     <div class="bento-p">
       <div class="bento-h"><div class="bento-hl">${I.grid} ${t("quick",lang)}</div></div>
       <div class="bento-b stagger">
@@ -336,7 +345,11 @@ function vdPage(info: VideoInfoResult, lang: Lang): string {
     <div class="di">
       <h1 class="dt">${esc(info.title)}</h1>
       <div class="dm">#${info.video_id}</div>
-      <div class="dq">${q.map(qu => `<span class="qt">${qu}</span>`).join("")}</div>
+      <div class="dq">${q.map(qq => `<span class="qt">${qq}</span>`).join("")}</div>
+      <div id="vtags-${info.video_id}" class="mt8" style="font-size:.7rem;color:var(--fg4);line-height:1.6;max-width:50ch"
+        hx-get="/api/video/tags/${info.video_id}" hx-trigger="load" hx-swap="innerHTML">
+        <span style="opacity:.5">${l==='zh'?'加载标签...':'Loading tags...'}</span>
+      </div>
       <div class="da mt12">
         <select class="inp" id="dc-q" style="width:90px"><option value="">720p</option><option>2160p</option><option>1080p</option><option selected>720p</option><option>480p</option><option>360p</option></select>
         <button class="btn btn-p btn-sm" data-dl="video:${info.video_id}">${I.dl} ${t("dl_btn",lang)}</button>
@@ -406,7 +419,7 @@ function settingsPage(lang: Lang, saved?: boolean, pwdMsg?: string): string {
   <div class="bento-h"><div class="bento-hl">${I.zz} ${lang==='zh'?'代理设置':'Proxy Settings'}</div></div>
   <div class="bento-b" style="padding:20px">
     ${saved ? `<div style="background:var(--green-dim);color:var(--green);padding:10px 16px;border-radius:var(--r-sm);font-size:.75rem;margin-bottom:16px;border:1px solid var(--green);font-family:var(--mono)">${lang==='zh'?'已保存。引擎将在下次请求时使用新代理。':'Saved. Engine will use new proxy on next request.'}</div>` : ""}
-    <form hx-post="/api/proxy" hx-target="#main-body" hx-swap="innerHTML">
+    <form method="POST" action="/api/proxy">
       <div style="margin-bottom:16px">
         <label style="display:block;font-size:.72rem;color:var(--fg3);margin-bottom:6px;font-family:var(--mono);letter-spacing:.04em">HTTP Proxy</label>
         <input name="http" class="inp" placeholder="http://127.0.0.1:10808" value="${esc(cfg.http)}">
@@ -497,6 +510,17 @@ app.post("/api/login", async ({ body, headers }) => {
 app.get("/api/logout", () => new Response("", { status: 302, headers: { "Location": "/login", "Set-Cookie": "auth=;path=/;max-age=0" } }));
 
 // Auth required below
+// Get author name from engine
+app.get("/api/user/name/:id", async ({ params: { id } }) => {
+  const ENGINE = process.env.ENGINE_URL || "http://127.0.0.1:5001";
+  try {
+    const r = await fetch(ENGINE, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "user_name", user_id: id }) });
+    if (!r.ok) return new Response(JSON.stringify({ name: id }), { headers: { "Content-Type": "application/json" } });
+    const data = await r.json();
+    return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
+  } catch { return new Response(JSON.stringify({ name: id }), { headers: { "Content-Type": "application/json" } }); }
+});
+
 // Settings
 app.get("/settings", ({ headers }) => {
   if (!isAuthed(headers)) return Response.redirect("/login", 302);
@@ -504,9 +528,10 @@ app.get("/settings", ({ headers }) => {
   return hx(settingsPage(l), l, l === 'zh' ? '设置' : 'Settings', "s", headers);
 });
 app.post("/api/proxy", async ({ body, headers }) => {
+  if (!isAuthed(headers)) return Response.redirect("/login", 302);
   const l = gl(headers);
-  const raw = body instanceof FormData ? Object.fromEntries(body as unknown as Iterable<[string, FormDataEntryValue]>) : (body as Record<string, unknown> | undefined);
-  saveProxy({ http: String((raw as any)?.http || "").trim(), socks5: String((raw as any)?.socks5 || "").trim() });
+  const raw = body as any;
+  saveProxy({ http: String(raw?.http || "").trim(), socks5: String(raw?.socks5 || "").trim() });
   return hx(settingsPage(l, true), l, l === 'zh' ? '设置' : 'Settings', "s", headers);
 });
 
@@ -531,6 +556,47 @@ app.post("/api/password", async ({ body, headers }) => {
   return hx(settingsPage(l, false, l === 'zh' ? '密码已更新' : 'Password updated'), l, l === 'zh' ? '设置' : 'Settings', "s", headers);
 });
 
+// RSS dashboard API — checks all subscriptions
+app.get("/api/rss/dashboard", async ({ headers }) => {
+  if (!isAuthed(headers)) return new Response("", { headers: { "Content-Type": "text/html" } });
+  const l = gl(headers);
+  const subs = loadRss();
+  if (!subs.length) return new Response(`<div class="emp"><div style="font-size:.7rem;color:var(--fg4)">${l==='zh'?'暂无订阅，前往 RSS 页面添加':'No subscriptions, visit RSS page to add'}</div></div>`, { headers: { "Content-Type": "text/html" } });
+  
+  const results = await Promise.all(subs.map(async (s) => {
+    const r = await getUserUploaded(s.user_id, 0);
+    const cnt = r.count || (r.videos || []).length;
+    return { sub: s, current: cnt, delta: cnt - s.last_count };
+  }));
+  
+  const updated = results.filter(x => x.delta > 0);
+  for (const u of updated) {
+    const si = subs.findIndex(s => s.user_id === u.sub.user_id);
+    if (si >= 0) subs[si].last_count = u.current;
+  }
+  if (updated.length > 0) saveRss(subs);
+  
+  if (!updated.length) {
+    return new Response(`<div class="emp"><div style="font-size:.7rem;color:var(--fg4)">${l==='zh'?'所有订阅均无更新':'All subscriptions up to date'}</div></div>`, { headers: { "Content-Type": "text/html" } });
+  }
+  
+  const items = updated.map((u, i) => {
+    const name = u.sub.name && u.sub.name !== u.sub.user_id ? u.sub.name : u.sub.user_id;
+    return `<div class="li" style="border-left:2px solid var(--accent);--i:${i*.05}">
+      <div class="li-th" style="background:var(--accent-dim);color:var(--accent);font-size:.65rem;font-family:var(--mono)">NEW</div>
+      <div class="li-bd">
+        <div class="li-t">${esc(name)}</div>
+        <div class="li-m" style="font-family:var(--mono)">+${u.delta} ${l==='zh'?'部新作品':'new videos'} &middot; ${l==='zh'?'共':'Total'} ${u.current}</div>
+      </div>
+      <div class="li-act">
+        <a href="/user/${u.sub.user_id}/playlists" class="btn btn-p btn-xs">${l==='zh'?'查看':'View'}</a>
+      </div>
+    </div>`;
+  }).join("");
+  
+  return new Response(items, { headers: { "Content-Type": "text/html" } });
+});
+
 // RSS subscriptions
 app.get("/rss", ({ headers }) => {
   if (!isAuthed(headers)) return Response.redirect("/login", 302);
@@ -547,10 +613,15 @@ app.post("/api/rss/add", async ({ body, headers }) => {
   if (subs.find(s => s.user_id === uid)) {
     return new Response(rssPage(l, subs, l === 'zh' ? '已订阅该作者' : 'Already subscribed'), { headers: { "Content-Type": "text/html" } });
   }
-  // Fetch initial count to get name and baseline
+  // Fetch initial count and author name
   const r = await getUserUploaded(uid, 0);
   const count = r.count || (r.videos || []).length;
-  const name = (r as any).user_id ? `User ${uid}` : uid;
+  let name = uid;
+  try {
+    const ENGINE = process.env.ENGINE_URL || "http://127.0.0.1:5001";
+    const nr = await fetch(ENGINE, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "user_name", user_id: uid }) });
+    if (nr.ok) { const nd = await nr.json() as any; if (nd.name && nd.name !== `User ${uid}`) name = nd.name; }
+  } catch {}
   subs.push({ user_id: uid, name, last_count: count, added_at: Date.now() });
   saveRss(subs);
   return new Response(rssPage(l, subs, l === 'zh' ? `已添加 #${uid}，当前 ${count} 部作品` : `Added #${uid}, ${count} videos`), { headers: { "Content-Type": "text/html" } });
@@ -684,12 +755,33 @@ app.get("/api/dc/preview/user/:id", async ({ params: { id }, headers }) => {
   const l = gl(headers);
   const r = await getUserPlaylists(id);
   const pls = r.playlists || [];
+  // Fetch author name
+  let authorName = id;
+  try {
+    const ENGINE = process.env.ENGINE_URL || "http://127.0.0.1:5001";
+    const nr = await fetch(ENGINE, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "user_name", user_id: id }) });
+    if (nr.ok) { const nd = await nr.json() as any; if (nd.name && nd.name !== `User ${id}`) authorName = nd.name; }
+  } catch {}
   if (!pls.length) return new Response(`<div class="emp"><div class="emp-t">${t("dc_no_result", l)}</div></div>`, { headers: { "Content-Type": "text/html" } });
   const phtml = pls.map(p => `<a href="/playlist/${p.id}" class="li"><div class="li-th" style="background:var(--accent-bg);color:var(--accent);font-family:var(--mono)">PL</div><div class="li-bd"><div class="li-t">${esc(p.title)}</div><div class="li-m">#${p.id}</div></div><div class="li-act">${I.ch}</div></a>`).join("");
   return new Response(`<div class="bento-p" style="animation:scaleIn .3s var(--ease) both">
-  <div class="bento-h"><div class="bento-hl">${I.usr} ${l === 'zh' ? '用户' : 'User'} ${esc(id)}</div><div class="bento-count">${pls.length}</div></div>
+  <div class="bento-h"><div class="bento-hl">${I.usr} ${esc(authorName)}</div><div class="bento-count">${pls.length}</div></div>
   <div style="padding:8px 16px;border-bottom:1px solid var(--bd)"><button class="btn btn-p btn-sm" data-dl="user:${id}">${I.dl} ${t("dl_works", l)} (${pls.length})</button></div>
   <div class="bento-b stagger">${phtml}</div></div>`, { headers: { "Content-Type": "text/html" } });
+});
+
+
+// Video tags
+app.get("/api/video/tags/:id", async ({ params: { id } }) => {
+  const ENGINE = process.env.ENGINE_URL || "http://127.0.0.1:5001";
+  try {
+    const r = await fetch(ENGINE, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "video_tags", video_id: id }) });
+    if (!r.ok) return new Response("", { headers: { "Content-Type": "text/html" } });
+    const data = await r.json() as any;
+    const tags = (data.tags || []).map((t: string) => `<span class="qt" style="font-size:.62rem;padding:2px 8px;border:1px solid var(--bd);background:var(--bg2)">${esc(t)}</span>`).join("");
+    const desc = data.description ? `<div style="margin-top:8px;opacity:.8">${esc(data.description)}</div>` : "";
+    return new Response(tags + desc, { headers: { "Content-Type": "text/html" } });
+  } catch { return new Response("", { headers: { "Content-Type": "text/html" } }); }
 });
 
 // Cover proxy

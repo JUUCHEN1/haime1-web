@@ -190,6 +190,38 @@ class EngineHandler(BaseHTTPRequestHandler):
         try:
             if action == "user_playlists":
                 result.update(action_user_playlists(self.scraper, request.get("user_id", "")))
+            elif action == "user_name":
+                uid = request.get("user_id", "")
+                try:
+                    r = self.scraper.get(f"{BASE_URL}/user/{uid}/uploaded", timeout=15)
+                    if r.status_code == 200:
+                        m = re.search(r"<h3[^>]*>(.*?)</h3>", r.text)
+                        name = m.group(1).strip() if m else f"User {uid}"
+                        result["name"] = name
+                        result["user_id"] = uid
+                    else:
+                        result["name"] = f"User {uid}"
+                except Exception as e:
+                    result["name"] = f"User {uid}"
+                    result["error"] = str(e)
+            elif action == "video_tags":
+                vid = request.get("video_id", "")
+                try:
+                    r = self.scraper.get(f"{BASE_URL}/watch?v={vid}", timeout=15)
+                    if r.status_code == 200:
+                        tags = re.findall(r'<a[^>]*href="[^"]*tag[^"]*"[^>]*>(.*?)</a>', r.text, re.DOTALL)
+                        if not tags:
+                            tags = re.findall(r'<a[^>]*class="[^"]*badge[^"]*"[^>]*>(.*?)</a>', r.text, re.DOTALL)
+                        desc_match = re.search(r'<meta[^>]*name="description"[^>]*content="([^"]*)"', r.text)
+                        result["tags"] = [t.strip() for t in tags if t.strip()][:10]
+                        result["description"] = desc_match.group(1).strip()[:500] if desc_match else ""
+                    else:
+                        result["tags"] = []
+                        result["description"] = ""
+                except Exception as e:
+                    result["tags"] = []
+                    result["description"] = ""
+                    result["error"] = str(e)
             elif action == "health":
                 try:
                     r = self.scraper.get(f"{BASE_URL}/", timeout=15)
