@@ -11,29 +11,32 @@ import { DlTask, dlQueue, addTask, cancelTask, clearDone } from "./download";
 import { findChannel } from "./channels/index";
 import { join } from "node:path";
 import { createHmac, randomBytes } from "node:crypto";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, statSync, rmdirSync, mkdirSync } from "node:fs";
 
 const APP = "hanime-web";
 const PORT = 3280;
 const PER_PAGE = 30;
 const DL_DIR = process.env.DL_DIR || join(process.env.HOME || "/tmp", "Downloads/hanime");
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin";
-const PASSWORD_FILE = join(process.cwd(), "admin-password.json");
-const PROXY_CONFIG_PATH = join(process.cwd(), "proxy-config.json");
-const RSS_SUBS_PATH = join(process.cwd(), "rss-subs.json");
-const RSS_CONFIG_PATH = join(process.cwd(), "rss-config.json");
+const DATA_DIR = join(process.cwd(), "data");
+const PASSWORD_FILE = join(DATA_DIR, "admin-password.json");
+const PROXY_CONFIG_PATH = join(DATA_DIR, "proxy-config.json");
+const RSS_SUBS_PATH = join(DATA_DIR, "rss-subs.json");
+const RSS_CONFIG_PATH = join(DATA_DIR, "rss-config.json");
 const DEFAULT_RSS_INTERVAL = 10800; // 3 hours
 const SESSION_SECRET = process.env.SESSION_SECRET || randomBytes(32).toString("hex");
 
+// Seed password file from env var on first boot
+if (!existsSync(DATA_DIR)) { mkdirSync(DATA_DIR, { recursive: true }); }
 // Seed password file from env var on first boot (so web UI can mutate it later)
 if (!existsSync(PASSWORD_FILE)) {
   writeFileSync(PASSWORD_FILE, JSON.stringify({ password: ADMIN_PASSWORD }), "utf-8");
 }
 function getPassword(): string {
-  try { return JSON.parse(readFileSync(PASSWORD_FILE, "utf-8")).password || ADMIN_PASSWORD; } catch { return ADMIN_PASSWORD; }
+  return safeReadJSON<{ password: string }>(PASSWORD_FILE, { password: ADMIN_PASSWORD }).password;
 }
 function setPassword(newPwd: string): void {
-  writeFileSync(PASSWORD_FILE, JSON.stringify({ password: newPwd }), "utf-8");
+  safeWriteJSON(PASSWORD_FILE, { password: newPwd });
 }
 
 // ─── Auth ────────────────────────────────────────────────────
@@ -56,26 +59,40 @@ function isAuthed(h?: Record<string, string | undefined>): boolean {
   return verifySession(h?.cookie || "");
 }
 
-// ─── Proxy Config ────────────────────────────────────────────
+// ─── File helpers (handle Docker volume directory mounts)
+function safeReadJSON<T>(path: string, fallback: T): T {
+  try {
+    const st = statSync(path);
+    if (st.isDirectory()) { rmdirSync(path); return fallback; }
+    if (st.isFile()) return JSON.parse(readFileSync(path, "utf-8"));
+  } catch { return fallback; }
+  return fallback;
+}
+function safeWriteJSON(path: string, data: unknown): void {
+  try {
+    // If path is a directory (Docker volume mount bug), remove it first
+    if (existsSync(path)) {
+      const st = statSync(path);
+      if (st.isDirectory()) rmdirSync(path);
+    }
+    writeFileSync(path, JSON.stringify(data, null, 2));
+  } catch (e) { console.error("[server] write error:", path, e); }
+}
+
+// ─── Proxy Config// ─── Proxy Config ────────────────────────────────────────────
 interface ProxyConfig { http: string; socks5: string; }
 function loadProxy(): ProxyConfig {
-  try {
-    if (existsSync(PROXY_CONFIG_PATH)) {
-      return JSON.parse(readFileSync(PROXY_CONFIG_PATH, "utf-8"));
-    }
-  } catch {}
-  return { http: "", socks5: "" };
+  return safeReadJSON<ProxyConfig>(PROXY_CONFIG_PATH, { http: "", socks5: "" });
 }
 function saveProxy(cfg: ProxyConfig): void {
-  writeFileSync(PROXY_CONFIG_PATH, JSON.stringify(cfg, null, 2));
+  safeWriteJSON(PROXY_CONFIG_PATH, cfg);
 }
 // RSS config
 function loadRssConfig(): { interval_seconds: number } {
-  try { if (existsSync(RSS_CONFIG_PATH)) return JSON.parse(readFileSync(RSS_CONFIG_PATH, "utf-8")); } catch {}
-  return { interval_seconds: DEFAULT_RSS_INTERVAL };
+  return safeReadJSON<{ interval_seconds: number }>(RSS_CONFIG_PATH, { interval_seconds: DEFAULT_RSS_INTERVAL });
 }
 function saveRssConfig(cfg: { interval_seconds: number }): void {
-  writeFileSync(RSS_CONFIG_PATH, JSON.stringify(cfg, null, 2));
+  safeWriteJSON(RSS_CONFIG_PATH, cfg);
 }
 
 function getEngineProxy(): string {
@@ -92,11 +109,10 @@ function cset(k: string, v: string[], c: number, p: number) { cache.set(k, { v, 
 // ─── RSS Subscriptions ──────────────────────────────────────
 interface RssSub { user_id: string; name: string; last_count: number; added_at: number; }
 function loadRss(): RssSub[] {
-  try { if (existsSync(RSS_SUBS_PATH)) return JSON.parse(readFileSync(RSS_SUBS_PATH, "utf-8")); } catch {}
-  return [];
+  return safeReadJSON<RssSub[]>(RSS_SUBS_PATH, []);
 }
 function saveRss(subs: RssSub[]): void {
-  writeFileSync(RSS_SUBS_PATH, JSON.stringify(subs, null, 2));
+  safeWriteJSON(RSS_SUBS_PATH, subs);
 }
 async function checkRssSub(sub: RssSub): Promise<{ new_count: number; new_videos: number; name: string }> {
   const r = await getUserUploaded(sub.user_id, 0);
@@ -502,8 +518,8 @@ function rssPage(lang: Lang, subs: RssSub[], msg?: string): string {
     return `<div class="li" style="animation:slideUp .3s var(--ease) both;animation-delay:${i*40}ms">
       <div class="li-th" style="background:var(--accent-dim);color:var(--accent);font-family:var(--mono);font-size:.65rem">RSS</div>
       <div class="li-bd">
-        <div class="li-t">${esc(s.name || s.user_id)}</div>
-        <div class="li-m">#${s.user_id} · ${lang==='zh'?'共':'Total'} ${s.last_count} ${lang==='zh'?'部':'videos'}</div>
+        <div class="li-t">${esc(s.name && s.name !== s.user_id ? s.name : s.user_id)}</div>
+        <div class="li-m" style="font-family:var(--mono);font-size:.65rem">#${s.user_id} &middot; ${lang==='zh'?'共':'Total'} ${s.last_count} ${lang==='zh'?'部':'videos'}</div>
       </div>
       <div class="li-act" style="display:flex;gap:4px">
         <button class="btn btn-xs btn-p" hx-post="/api/rss/check/${s.user_id}" hx-target="#rss-body" hx-indicator="closest .li">${lang==='zh'?'检查':'Check'}</button>
@@ -668,9 +684,9 @@ app.post("/api/rss/add", async ({ body, headers }) => {
   const count = r.count || (r.videos || []).length;
   let name = uid;
   try {
-    const ENGINE = process.env.ENGINE_URL || "http://127.0.0.1:5001";
-    const nr = await fetch(ENGINE, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "user_name", user_id: uid }) });
-    if (nr.ok) { const nd = await nr.json() as any; if (nd.name && nd.name !== `User ${uid}`) name = nd.name; }
+    const ENGINE2 = process.env.ENGINE_URL || "http://127.0.0.1:5001";
+    const nr2 = await fetch(ENGINE2, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "user_name", user_id: uid }) });
+    if (nr2.ok) { const nd2 = await nr2.json() as any; if (nd2.name && nd2.name !== `User ${uid}`) name = nd2.name; }
   } catch {}
   subs.push({ user_id: uid, name, last_count: count, added_at: Date.now() });
   saveRss(subs);

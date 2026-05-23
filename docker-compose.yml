@@ -12,4 +12,4 @@ services:
       - SESSION_SECRET=change-me-in-production
     volumes:
       - ./downloads:/downloads
-      - ./proxy-config.json:/app/proxy-config.json
+      - ./data:/app/data

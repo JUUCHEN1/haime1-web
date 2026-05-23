@@ -41,6 +41,7 @@ RUN pip install --no-cache-dir supervisor
 
 # 4. 创建应用目录
 WORKDIR /app
+RUN mkdir -p /app/data
 
 # 5. 复制应用文件
 COPY src/ /app/src/
