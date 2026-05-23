@@ -10,11 +10,54 @@ import type { Playlist, VideoInfoResult } from "./engine";
 import { DlTask, dlQueue, addTask, cancelTask, clearDone } from "./download";
 import { findChannel } from "./channels/index";
 import { join } from "node:path";
+import { createHmac, randomBytes } from "node:crypto";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 
 const APP = "hanime-web";
 const PORT = 3280;
 const PER_PAGE = 30;
 const DL_DIR = process.env.DL_DIR || join(process.env.HOME || "/tmp", "Downloads/hanime");
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin";
+const PROXY_CONFIG_PATH = join(process.cwd(), "proxy-config.json");
+const SESSION_SECRET = process.env.SESSION_SECRET || randomBytes(32).toString("hex");
+
+// ─── Auth ────────────────────────────────────────────────────
+function signSession(val: string): string {
+  const hmac = createHmac("sha256", SESSION_SECRET);
+  hmac.update(val);
+  return `${val}.${hmac.digest("hex")}`;
+}
+function verifySession(cookie: string): boolean {
+  if (!cookie) return false;
+  const m = cookie.match(/\bauth=([^;]+)/);
+  if (!m) return false;
+  const parts = m[1].split(".");
+  if (parts.length !== 2) return false;
+  const hmac = createHmac("sha256", SESSION_SECRET);
+  hmac.update(parts[0]);
+  return hmac.digest("hex") === parts[1];
+}
+function isAuthed(h?: Record<string, string | undefined>): boolean {
+  return verifySession(h?.cookie || "");
+}
+
+// ─── Proxy Config ────────────────────────────────────────────
+interface ProxyConfig { http: string; socks5: string; }
+function loadProxy(): ProxyConfig {
+  try {
+    if (existsSync(PROXY_CONFIG_PATH)) {
+      return JSON.parse(readFileSync(PROXY_CONFIG_PATH, "utf-8"));
+    }
+  } catch {}
+  return { http: "", socks5: "" };
+}
+function saveProxy(cfg: ProxyConfig): void {
+  writeFileSync(PROXY_CONFIG_PATH, JSON.stringify(cfg, null, 2));
+}
+function getEngineProxy(): string {
+  const cfg = loadProxy();
+  return cfg.socks5 || cfg.http || "";
+}
 
 // ─── Cache ───────────────────────────────────────────────────
 const cache = new Map<string, { v: string[]; c: number; p: number; t: number }>();
@@ -89,6 +132,9 @@ function shell(title: string, body: string, nav: string, lang: Lang): Response {
 <a href="/dc/user" class="side-link${nav==='cu'?' active':''}">${I.usr}<span>${t("dc_user",lang)}</span></a>
 <div class="side-section">${t("quick",lang)}</div>
 <a href="/downloads" class="side-link${nav==='d'?' active':''}" hx-get="/downloads" hx-target="#main-body" hx-push-url="true">${I.dl2}<span>${t("dl",lang)}</span></a>
+<div class="side-section">System</div>
+<a href="/settings" class="side-link${nav==='s'?' active':''}">${I.zz}<span>${lang==='zh'?'设置':'Settings'}</span></a>
+<a href="/api/logout" class="side-link">${I.back}<span>${lang==='zh'?'登出':'Logout'}</span></a>
 </div><div class="side-foot">${APP} · v4</div></nav>
 <div class="main"><header class="main-hdr"><span class="main-hdr-title">${esc(title)}</span><div class="main-hdr-right">${langBtn(lang)}</div></header>
 <div class="main-body" id="main-body">${body}</div></div></div></body></html>`,{headers:{"Content-Type":"text/html; charset=utf-8","Set-Cookie":`lang=${lang};path=/;max-age=31536000`}});
@@ -295,12 +341,86 @@ function playHTML(title: string, vid: string, url: string, q: string): string {
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>${esc(title)}</title><link rel="stylesheet" href="/styles.css"></head><body style="background:#000"><div class="ps" style="border-radius:0;margin:0"><video controls autoplay class="pv" style="max-height:100dvh"><source src="${esc(url)}" type="video/mp4"></video><div class="pb"><a href="/video/${vid}" class="btn btn-g btn-sm">${I.back}</a><span class="pt truncate">${esc(title)}</span><span class="pq">${q}</span><a href="${esc(url)}" target="_blank" class="btn btn-s btn-sm">${I.dl}</a></div></div></body></html>`;
 }
 
+// ─── Login page ─────────────────────────────────────────────
+function loginPage(lang: Lang, error?: string): string {
+  return `<!DOCTYPE html><html lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Login — ${APP}</title><link rel="stylesheet" href="/styles.css"></head><body style="display:flex;align-items:center;justify-content:center;min-height:100dvh;background:var(--bg)">
+<div style="width:100%;max-width:380px;padding:40px 32px">
+  <div style="margin-bottom:32px;text-align:left">
+    <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px">
+      <span style="color:var(--accent);font-weight:650;font-size:1.2rem;letter-spacing:-.02em">hanime</span><span style="color:var(--fg);font-weight:600;font-size:1.2rem;letter-spacing:-.02em">web</span>
+      <span style="font-size:.6rem;padding:2px 7px;border-radius:100px;background:var(--accent-dim);color:var(--accent);font-family:var(--mono)">v4</span>
+    </div>
+    <div style="font-size:.75rem;color:var(--fg4);font-family:var(--mono)">${lang==='zh'?'请输入管理员密码':'Enter admin password'}</div>
+  </div>
+  ${error ? `<div style="background:var(--accent-dim);color:var(--accent);padding:10px 16px;border-radius:var(--r-sm);font-size:.75rem;margin-bottom:16px;border:1px solid var(--accent);font-family:var(--mono)">${error}</div>` : ""}
+  <form method="POST" action="/api/login">
+    <input type="password" name="password" class="inp" placeholder="Password" autofocus style="margin-bottom:12px;padding:12px 16px;font-size:.9rem">
+    <button type="submit" class="btn btn-p" style="width:100%;padding:12px;font-size:.85rem">${lang==='zh'?'登录':'Login'}</button>
+  </form>
+</div></body></html>`;
+}
+
+// ─── Settings page ──────────────────────────────────────────
+function settingsPage(lang: Lang, saved?: boolean): string {
+  const cfg = loadProxy();
+  return `<div style="animation:scaleIn .35s var(--ease) both">
+<div class="bento-p mb20">
+  <div class="bento-h"><div class="bento-hl">${I.zz} ${lang==='zh'?'代理设置':'Proxy Settings'}</div></div>
+  <div class="bento-b" style="padding:20px">
+    ${saved ? `<div style="background:var(--green-dim);color:var(--green);padding:10px 16px;border-radius:var(--r-sm);font-size:.75rem;margin-bottom:16px;border:1px solid var(--green);font-family:var(--mono)">${lang==='zh'?'已保存。引擎将在下次请求时使用新代理。':'Saved. Engine will use new proxy on next request.'}</div>` : ""}
+    <form method="POST" action="/api/proxy">
+      <div style="margin-bottom:16px">
+        <label style="display:block;font-size:.72rem;color:var(--fg3);margin-bottom:6px;font-family:var(--mono);letter-spacing:.04em">HTTP Proxy</label>
+        <input name="http" class="inp" placeholder="http://127.0.0.1:10808" value="${esc(cfg.http)}">
+      </div>
+      <div style="margin-bottom:16px">
+        <label style="display:block;font-size:.72rem;color:var(--fg3);margin-bottom:6px;font-family:var(--mono);letter-spacing:.04em">SOCKS5 Proxy</label>
+        <input name="socks5" class="inp" placeholder="socks5://127.0.0.1:10809" value="${esc(cfg.socks5)}">
+      </div>
+      <div style="font-size:.7rem;color:var(--fg4);margin-bottom:16px;line-height:1.5">${lang==='zh'?'引擎抓取 hanime1.me 时使用代理。SOCKS5 优先于 HTTP。留空则不使用代理。':'Proxy used by engine when fetching hanime1.me. SOCKS5 takes priority over HTTP. Leave empty to disable proxy.'}</div>
+      <button type="submit" class="btn btn-p">${lang==='zh'?'保存配置':'Save Config'}</button>
+    </form>
+  </div>
+</div></div>`;
+}
 // ─── Routes ─────────────────────────────────────────────────
 const app = new Elysia();
 app.get("/styles.css", () => Bun.file("src/styles.css"));
 
+// Public: login
+app.get("/login", ({ headers }) => {
+  const l = gl(headers);
+  return new Response(loginPage(l), { headers: { "Content-Type": "text/html; charset=utf-8" } });
+});
+app.post("/api/login", async ({ body, headers }) => {
+  const l = gl(headers);
+  const raw = body instanceof FormData ? body.get("password") : (body as any)?.password;
+  if (raw === ADMIN_PASSWORD) {
+    const token = signSession(Date.now().toString());
+    return new Response("", { status: 302, headers: { "Location": "/", "Set-Cookie": `auth=${token};path=/;max-age=86400;HttpOnly` } });
+  }
+  return new Response(loginPage(l, l === 'zh' ? '密码错误' : 'Wrong password'), { status: 401, headers: { "Content-Type": "text/html; charset=utf-8" } });
+});
+app.get("/api/logout", () => new Response("", { status: 302, headers: { "Location": "/login", "Set-Cookie": "auth=;path=/;max-age=0" } }));
+
+// Auth required below
+// Settings
+app.get("/settings", ({ headers }) => {
+  if (!isAuthed(headers)) return Response.redirect("/login", 302);
+  const l = gl(headers);
+  return hx(settingsPage(l), l, l === 'zh' ? '设置' : 'Settings', "s", headers);
+});
+app.post("/api/proxy", async ({ body, headers }) => {
+  if (!isAuthed(headers)) return Response.redirect("/login", 302);
+  const l = gl(headers);
+  const raw = body as any;
+  saveProxy({ http: String(raw?.http || "").trim(), socks5: String(raw?.socks5 || "").trim() });
+  return hx(settingsPage(l, true), l, l === 'zh' ? '设置' : 'Settings', "s", headers);
+});
+
 // Search router
 app.get("/search", ({ query: { q }, headers }) => {
+  if (!isAuthed(headers)) return Response.redirect("/login", 302);
   const s = (q || "").trim();
   if (!s) return Response.redirect("/", 302);
   const ch = findChannel(s);
@@ -313,6 +433,18 @@ app.get("/search", ({ query: { q }, headers }) => {
     }
   }
   return Response.redirect(`/user/${encodeURIComponent(s)}/playlists`, 302);
+});
+
+// Auth guard — all routes below require login
+app.onBeforeHandle(({ request, set }) => {
+  const url = new URL(request.url);
+  if (url.pathname === "/login" || url.pathname === "/api/login" || url.pathname === "/styles.css") return;
+  const cookie = request.headers.get("cookie") || "";
+  if (!verifySession(cookie)) {
+    set.status = 302;
+    set.headers = { Location: "/login" };
+    return new Response("", { status: 302, headers: { Location: "/login" } });
+  }
 });
 
 // Pages
