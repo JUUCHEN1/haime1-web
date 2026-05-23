@@ -149,7 +149,14 @@ function shell(title: string, body: string, nav: string, lang: Lang): Response {
 <a href="/api/logout" class="side-link">${I.back}<span>${lang==='zh'?'登出':'Logout'}</span></a>
 </div><div class="side-foot">${APP} · v4</div></nav>
 <div class="main"><header class="main-hdr"><span class="main-hdr-title">${esc(title)}</span><div class="main-hdr-right">${langBtn(lang)}</div></header>
-<div class="main-body" id="main-body">${body}</div></div></div></body></html>`,{headers:{"Content-Type":"text/html; charset=utf-8","Set-Cookie":`lang=${lang};path=/;max-age=31536000`}});
+<div class="main-body" id="main-body">${body}</div></div>
+<nav class="mobile-nav">
+  <a href="/" class="${nav==='h'?'active':''}">${I.home}<span>${t("home",lang)}</span></a>
+  <a href="/dc/video" class="${nav==='cv'?'active':''}" hx-get="/dc/video" hx-target="#main-body" hx-push-url="true">${I.film}<span>${t("dc_single",lang)}</span></a>
+  <a href="/downloads" class="${nav==='d'?'active':''}" hx-get="/downloads" hx-target="#main-body" hx-push-url="true">${I.dl2}<span>${t("dl",lang)}</span></a>
+  <a href="/settings" class="${nav==='s'?'active':''}" hx-get="/settings" hx-target="#main-body" hx-push-url="true">${I.zz}<span>${lang==='zh'?'设置':'Settings'}</span></a>
+</nav>
+</div></body></html>`,{headers:{"Content-Type":"text/html; charset=utf-8","Set-Cookie":`lang=${lang};path=/;max-age=31536000`}});
 }
 function hx(body: string, lang: Lang, title: string, nav: string, h?: Record<string, string | undefined>): Response {
   if (h?.["hx-request"]) return new Response(body, { headers: { "Content-Type": "text/html; charset=utf-8" } });
