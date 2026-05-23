@@ -160,7 +160,10 @@ function langBtn(lang: Lang): string {
 }
 
 // ─── DC page helper ─────────────────────────────────────────
-function dcPage(type: string, icon: string, color: string, label: string, desc: string, lang: Lang): string {
+function dcPage(type: string, icon: string, color: string, label: string, desc: string, lang: Lang, opts?: { quality?: boolean }): string {
+  const qSel = opts?.quality
+    ? `<select class="inp" id="dc-q" style="width:90px"><option value="">默认</option><option>2160p</option><option>1080p</option><option selected>720p</option><option>480p</option><option>360p</option></select>`
+    : "";
   return `<div style="animation:scaleIn .35s var(--ease) both">
 <div class="bento-p mb20">
   <div class="bento-h">
@@ -170,6 +173,7 @@ function dcPage(type: string, icon: string, color: string, label: string, desc: 
     <div style="font-size:.78rem;color:var(--fg3);margin-bottom:14px;line-height:1.6">${desc}</div>
     <div class="dc-bar">
       <input id="dc-inp" class="inp" placeholder="${ts("dc_input_ph",lang)}" onkeydown="if(event.key==='Enter'){event.preventDefault();dcPreview('${type}')}">
+      ${qSel}
       <button id="dc-preview-btn" class="btn btn-p" onclick="dcPreview('${type}')">${I.srch} ${t("dc_preview",lang)}</button>
     </div>
   </div>
@@ -179,12 +183,55 @@ function dcPage(type: string, icon: string, color: string, label: string, desc: 
 
 // ─── Home ───────────────────────────────────────────────────
 function homePage(lang: Lang): string {
+  const running = dlQueue.filter(x => x.status === 'running').length;
+  const done = dlQueue.filter(x => x.status === 'done').length;
+  const queue = dlQueue.filter(x => x.status === 'queued').length;
+  const errd = dlQueue.filter(x => x.status === 'error').length;
   return `<div class="srch">
     <form action="/search" method="GET" class="srch-w">
       <input type="text" name="q" class="srch-i" placeholder="${ts("search",lang)}" autofocus>
       <button type="submit" class="btn btn-p">${I.srch} ${t("srch",lang)}</button>
     </form>
     <div class="srch-h">${t("enter",lang)}</div>
+  </div>
+  <div class="st-grid">
+    <div class="st-card" style="--i:0">
+      <div class="st-hdr"><div class="st-icon blue">${I.dl2}</div></div>
+      <div class="st-val">${running}</div>
+      <div class="st-label">${t("dl_run",lang)}</div>
+    </div>
+    <div class="st-card" style="--i:1">
+      <div class="st-hdr"><div class="st-icon accent">${I.ok}</div></div>
+      <div class="st-val">${done}</div>
+      <div class="st-label">${t("dl_done",lang)}</div>
+    </div>
+    <div class="st-card" style="--i:2">
+      <div class="st-hdr"><div class="st-icon yellow">${I.dl2}</div></div>
+      <div class="st-val">${queue}</div>
+      <div class="st-label">${t("dl_wait",lang)}</div>
+    </div>
+    <div class="st-card" style="--i:3">
+      <div class="st-hdr"><div class="st-icon" style="color:var(--orange);background:var(--orange-dim)">${I.no}</div></div>
+      <div class="st-val">${errd}</div>
+      <div class="st-label">${t("dl_err",lang)}</div>
+    </div>
+  </div>
+  <div class="bento bento-31">
+    <div class="bento-p">
+      <div class="bento-h"><div class="bento-hl">${I.grid} ${t("quick",lang)}</div></div>
+      <div class="bento-b stagger">
+        <a href="/dc/video" class="li"><div class="li-th" style="background:var(--green-dim);color:var(--green);font-family:var(--mono)">DC</div><div class="li-bd"><div class="li-t">${t("dc_single",lang)}</div><div class="li-m">URL / ID → ${t("dc_preview",lang)} → Download</div></div><div class="li-act">${I.ch}</div></a>
+        <a href="/downloads" class="li" hx-get="/downloads" hx-target="#main-body" hx-push-url="true"><div class="li-th" style="background:var(--blue-dim);color:var(--blue)">DL</div><div class="li-bd"><div class="li-t">${t("dl",lang)}</div><div class="li-m">${running} ${t("dl_run",lang)} · ${done} ${t("dl_done",lang)}</div></div><div class="li-act">${I.ch}</div></a>
+        <div class="li" style="cursor:default"><div class="li-th" style="background:var(--accent-dim);color:var(--accent);font-family:var(--mono)">#1</div><div class="li-bd"><div class="li-t">${t("dl_to",lang)}</div><div class="li-m" style="font-family:var(--mono)">${DL_DIR}</div></div></div>
+      </div>
+    </div>
+    <div class="bento-p">
+      <div class="bento-h"><div class="bento-hl">${I.info} About</div></div>
+      <div class="bento-b" style="padding:18px">
+        <div class="about-text">${t("about",lang)}</div>
+        <div class="dq"><span class="qt">Elysia</span><span class="qt">HTMX 2.0</span><span class="qt">Bun</span><span class="qt">Geist</span></div>
+      </div>
+    </div>
   </div>`;
 }
 
@@ -493,11 +540,11 @@ app.get("/downloads", ({ headers }) => {
 // DC pages
 app.get("/dc/video", ({ headers }) => {
   const l = gl(headers);
-  return hx(dcPage("video", I.play, "green", t("dc_single", l), t("dc_single_desc", l), l), l, t("dc_single", l), "cv", headers);
+  return hx(dcPage("video", I.play, "green", t("dc_single", l), t("dc_single_desc", l), l, { quality: true }), l, t("dc_single", l), "cv", headers);
 });
 app.get("/dc/user", ({ headers }) => {
   const l = gl(headers);
-  return hx(dcPage("user", I.usr, "yellow", t("dc_user", l), t("dc_user_desc", l), l), l, t("dc_user", l), "cu", headers);
+  return hx(dcPage("user", I.usr, "yellow", t("dc_user", l), t("dc_user_desc", l), l, { quality: true }), l, t("dc_user", l), "cu", headers);
 });
 
 // Preview APIs
