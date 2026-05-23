@@ -28,7 +28,8 @@ FROM python:3.12-slim
 # 1. 从 Bun 镜像复制 bun 二进制
 COPY --from=bun-base /usr/local/bin/bun /usr/local/bin/bun
 
-# 2. 安装 Python 依赖 (requests)
+# 2. 安装系统依赖 + Python 依赖 (cloudscraper)
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir cloudscraper
 
 # 3. 安装 supervisord
@@ -40,6 +41,7 @@ WORKDIR /app
 # 5. 复制应用文件
 COPY src/ /app/src/
 COPY supervisord.conf /app/
+COPY diag.py /app/
 COPY package.json /app/
 
 # 6. 安装 Node 依赖 (elysia)
