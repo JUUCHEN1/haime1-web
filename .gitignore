@@ -4,3 +4,6 @@ node_modules/
 .env
 *.mp4
 dist/
+admin-password.json
+proxy-config.json
+downloads/

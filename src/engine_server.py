@@ -14,6 +14,7 @@ import sys
 import time
 import warnings
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from pathlib import Path
 
 import cloudscraper
 
@@ -24,6 +25,40 @@ RETRY_DELAY = 3
 BASE_URL = "https://hanime1.me"
 
 
+def _find_proxy_config() -> str:
+    """Locate proxy-config.json relative to this file or cwd."""
+    candidates = [
+        Path(__file__).resolve().parent.parent / "proxy-config.json",
+        Path.cwd() / "proxy-config.json",
+    ]
+    for p in candidates:
+        if p.exists():
+            return str(p)
+    return ""
+
+
+def _load_proxy_url() -> str:
+    """Resolve proxy URL: proxy-config.json → env vars → direct (empty)."""
+    cfg_path = _find_proxy_config()
+    if cfg_path:
+        try:
+            cfg = json.loads(open(cfg_path).read())
+            socks5 = (cfg.get("socks5") or "").strip()
+            if socks5:
+                return socks5
+            http = (cfg.get("http") or "").strip()
+            if http:
+                return http
+        except Exception:
+            pass
+    # Fallback to env vars
+    for key in ("ENGINE_PROXY", "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
+        val = os.environ.get(key, "").strip()
+        if val:
+            return val
+    return ""
+
+
 def create_scraper():
     s = cloudscraper.create_scraper()
     s.headers.update({
@@ -31,7 +66,7 @@ def create_scraper():
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.5",
     })
-    proxy_url = os.environ.get("ENGINE_PROXY") or os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy") or ""
+    proxy_url = _load_proxy_url()
     if proxy_url:
         s.proxies = {"http": proxy_url, "https": proxy_url}
     return s

@@ -18,8 +18,20 @@ const PORT = 3280;
 const PER_PAGE = 30;
 const DL_DIR = process.env.DL_DIR || join(process.env.HOME || "/tmp", "Downloads/hanime");
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin";
+const PASSWORD_FILE = join(process.cwd(), "admin-password.json");
 const PROXY_CONFIG_PATH = join(process.cwd(), "proxy-config.json");
 const SESSION_SECRET = process.env.SESSION_SECRET || randomBytes(32).toString("hex");
+
+// Seed password file from env var on first boot (so web UI can mutate it later)
+if (!existsSync(PASSWORD_FILE)) {
+  writeFileSync(PASSWORD_FILE, JSON.stringify({ password: ADMIN_PASSWORD }), "utf-8");
+}
+function getPassword(): string {
+  try { return JSON.parse(readFileSync(PASSWORD_FILE, "utf-8")).password || ADMIN_PASSWORD; } catch { return ADMIN_PASSWORD; }
+}
+function setPassword(newPwd: string): void {
+  writeFileSync(PASSWORD_FILE, JSON.stringify({ password: newPwd }), "utf-8");
+}
 
 // ─── Auth ────────────────────────────────────────────────────
 function signSession(val: string): string {
@@ -361,7 +373,7 @@ function loginPage(lang: Lang, error?: string): string {
 }
 
 // ─── Settings page ──────────────────────────────────────────
-function settingsPage(lang: Lang, saved?: boolean): string {
+function settingsPage(lang: Lang, saved?: boolean, pwdMsg?: string): string {
   const cfg = loadProxy();
   return `<div style="animation:scaleIn .35s var(--ease) both">
 <div class="bento-p mb20">
@@ -377,8 +389,29 @@ function settingsPage(lang: Lang, saved?: boolean): string {
         <label style="display:block;font-size:.72rem;color:var(--fg3);margin-bottom:6px;font-family:var(--mono);letter-spacing:.04em">SOCKS5 Proxy</label>
         <input name="socks5" class="inp" placeholder="socks5://127.0.0.1:10809" value="${esc(cfg.socks5)}">
       </div>
-      <div style="font-size:.7rem;color:var(--fg4);margin-bottom:16px;line-height:1.5">${lang==='zh'?'引擎抓取 hanime1.me 时使用代理。SOCKS5 优先于 HTTP。留空则不使用代理。':'Proxy used by engine when fetching hanime1.me. SOCKS5 takes priority over HTTP. Leave empty to disable proxy.'}</div>
+      <div style="font-size:.7rem;color:var(--fg4);margin-bottom:16px;line-height:1.5">${lang==='zh'?'留空则使用系统网络直连 hanime1.me。SOCKS5 优先于 HTTP。':'Leave empty to use system network (direct). SOCKS5 takes priority over HTTP.'}</div>
       <button type="submit" class="btn btn-p">${lang==='zh'?'保存配置':'Save Config'}</button>
+    </form>
+  </div>
+</div>
+<div class="bento-p">
+  <div class="bento-h"><div class="bento-hl">${I.usr} ${lang==='zh'?'修改密码':'Change Password'}</div></div>
+  <div class="bento-b" style="padding:20px">
+    ${pwdMsg ? `<div style="background:${pwdMsg.startsWith('!')?'var(--red-dim)':'var(--green-dim)'};color:${pwdMsg.startsWith('!')?'var(--red)':'var(--green)'};padding:10px 16px;border-radius:var(--r-sm);font-size:.75rem;margin-bottom:16px;border:1px solid ${pwdMsg.startsWith('!')?'var(--red)':'var(--green)'};font-family:var(--mono)">${pwdMsg.replace(/^!/,'')}</div>` : ""}
+    <form method="POST" action="/api/password">
+      <div style="margin-bottom:16px">
+        <label style="display:block;font-size:.72rem;color:var(--fg3);margin-bottom:6px;font-family:var(--mono);letter-spacing:.04em">${lang==='zh'?'当前密码':'Current Password'}</label>
+        <input name="old" type="password" class="inp" placeholder="********" autocomplete="current-password">
+      </div>
+      <div style="margin-bottom:16px">
+        <label style="display:block;font-size:.72rem;color:var(--fg3);margin-bottom:6px;font-family:var(--mono);letter-spacing:.04em">${lang==='zh'?'新密码':'New Password'}</label>
+        <input name="new" type="password" class="inp" placeholder="${lang==='zh'?'至少 4 位':'min 4 chars'}" autocomplete="new-password">
+      </div>
+      <div style="margin-bottom:16px">
+        <label style="display:block;font-size:.72rem;color:var(--fg3);margin-bottom:6px;font-family:var(--mono);letter-spacing:.04em">${lang==='zh'?'确认新密码':'Confirm New Password'}</label>
+        <input name="confirm" type="password" class="inp" placeholder="${lang==='zh'?'再次输入':'re-type'}">
+      </div>
+      <button type="submit" class="btn btn-p">${lang==='zh'?'更新密码':'Update Password'}</button>
     </form>
   </div>
 </div></div>`;
@@ -395,7 +428,7 @@ app.get("/login", ({ headers }) => {
 app.post("/api/login", async ({ body, headers }) => {
   const l = gl(headers);
   const raw = body instanceof FormData ? body.get("password") : (body as any)?.password;
-  if (raw === ADMIN_PASSWORD) {
+  if (raw === getPassword()) {
     const token = signSession(Date.now().toString());
     return new Response("", { status: 302, headers: { "Location": "/", "Set-Cookie": `auth=${token};path=/;max-age=86400;HttpOnly` } });
   }
@@ -416,6 +449,27 @@ app.post("/api/proxy", async ({ body, headers }) => {
   const raw = body as any;
   saveProxy({ http: String(raw?.http || "").trim(), socks5: String(raw?.socks5 || "").trim() });
   return hx(settingsPage(l, true), l, l === 'zh' ? '设置' : 'Settings', "s", headers);
+});
+
+// Change password
+app.post("/api/password", async ({ body, headers }) => {
+  if (!isAuthed(headers)) return Response.redirect("/login", 302);
+  const l = gl(headers);
+  const raw = body as any;
+  const oldPwd = String(raw?.old || "");
+  const newPwd = String(raw?.new || "").trim();
+  const confirm = String(raw?.confirm || "").trim();
+  if (oldPwd !== getPassword()) {
+    return hx(settingsPage(l, false, "!" + (l === 'zh' ? '当前密码不正确' : 'Current password is incorrect')), l, l === 'zh' ? '设置' : 'Settings', "s", headers);
+  }
+  if (!newPwd || newPwd.length < 4) {
+    return hx(settingsPage(l, false, "!" + (l === 'zh' ? '新密码至少 4 位' : 'New password must be at least 4 characters')), l, l === 'zh' ? '设置' : 'Settings', "s", headers);
+  }
+  if (newPwd !== confirm) {
+    return hx(settingsPage(l, false, "!" + (l === 'zh' ? '两次输入的新密码不一致' : 'New passwords do not match')), l, l === 'zh' ? '设置' : 'Settings', "s", headers);
+  }
+  setPassword(newPwd);
+  return hx(settingsPage(l, false, l === 'zh' ? '密码已更新' : 'Password updated'), l, l === 'zh' ? '设置' : 'Settings', "s", headers);
 });
 
 // Search router
