@@ -160,10 +160,7 @@ function langBtn(lang: Lang): string {
 }
 
 // ─── DC page helper ─────────────────────────────────────────
-function dcPage(type: string, icon: string, color: string, label: string, desc: string, lang: Lang, opts?: { quality?: boolean }): string {
-  const qSel = opts?.quality
-    ? `<select class="inp" id="dc-q" style="width:90px"><option value="">默认</option><option>2160p</option><option>1080p</option><option selected>720p</option><option>480p</option><option>360p</option></select>`
-    : "";
+function dcPage(type: string, icon: string, color: string, label: string, desc: string, lang: Lang): string {
   return `<div style="animation:scaleIn .35s var(--ease) both">
 <div class="bento-p mb20">
   <div class="bento-h">
@@ -173,7 +170,6 @@ function dcPage(type: string, icon: string, color: string, label: string, desc: 
     <div style="font-size:.78rem;color:var(--fg3);margin-bottom:14px;line-height:1.6">${desc}</div>
     <div class="dc-bar">
       <input id="dc-inp" class="inp" placeholder="${ts("dc_input_ph",lang)}" onkeydown="if(event.key==='Enter'){event.preventDefault();dcPreview('${type}')}">
-      ${qSel}
       <button id="dc-preview-btn" class="btn btn-p" onclick="dcPreview('${type}')">${I.srch} ${t("dc_preview",lang)}</button>
     </div>
   </div>
@@ -344,8 +340,7 @@ function dlPage(lang: Lang): string {
     </div>
   </div>
   <div style="font-size:.7rem;color:var(--fg3);font-family:var(--mono);margin-bottom:14px">${t("dl_to",lang)}: ${DL_DIR}</div>
-  ${dlQueue.length ? `<div class="bento-p"><div class="bento-b">${items}</div></div>` : `<div class="emp"><div class="emp-icon">${I.dl2}</div><div class="emp-t">${t("no_dl",lang)}</div></div>`}
-  <div class="mt12"><a href="/" class="btn btn-g btn-sm">${I.back} ${t("home",lang)}</a></div>`;
+  ${dlQueue.length ? `<div class="bento-p"><div class="bento-b">${items}</div></div>` : `<div class="emp"><div class="emp-icon">${I.dl2}</div><div class="emp-t">${t("no_dl",lang)}</div></div>`}`;
 }
 
 // ─── Video player ───────────────────────────────────────────
@@ -540,11 +535,11 @@ app.get("/downloads", ({ headers }) => {
 // DC pages
 app.get("/dc/video", ({ headers }) => {
   const l = gl(headers);
-  return hx(dcPage("video", I.play, "green", t("dc_single", l), t("dc_single_desc", l), l, { quality: true }), l, t("dc_single", l), "cv", headers);
+  return hx(dcPage("video", I.play, "green", t("dc_single", l), t("dc_single_desc", l), l), l, t("dc_single", l), "cv", headers);
 });
 app.get("/dc/user", ({ headers }) => {
   const l = gl(headers);
-  return hx(dcPage("user", I.usr, "yellow", t("dc_user", l), t("dc_user_desc", l), l, { quality: true }), l, t("dc_user", l), "cu", headers);
+  return hx(dcPage("user", I.usr, "yellow", t("dc_user", l), t("dc_user_desc", l), l), l, t("dc_user", l), "cu", headers);
 });
 
 // Preview APIs
