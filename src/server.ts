@@ -423,6 +423,7 @@ function dlPage(lang: Lang): string {
     </div>
   </div>
   <div style="font-size:.7rem;color:var(--fg3);font-family:var(--mono);margin-bottom:14px">${t("dl_to",lang)}: ${DL_DIR}</div>
+  <div id="dl-progress" hx-get="/api/dlstatus" hx-trigger="every 2s" hx-swap="innerHTML" style="margin-bottom:16px"><div class="emp" style="padding:12px"><span style="opacity:.5">${lang==='zh'?'加载进度中...':'Loading progress...'}</span></div></div>
   ${dlQueue.length ? `<div class="bento-p"><div class="bento-b">${items}</div></div>` : `<div class="emp"><div class="emp-icon">${I.dl2}</div><div class="emp-t">${t("no_dl",lang)}</div></div>`}`;
 }
 
@@ -938,9 +939,12 @@ app.get("/api/dlurl/:id", async ({ params: { id }, query: { quality } }) => {
 
 // Download APIs
 app.post("/api/dl/video/:id", async ({ params: { id } }) => {
-  const i = await getVideoInfo(id);
-  const t = addTask("hanime1", "video", `${i.title || id} [video]`, id);
-  return { id, label: t.label, status: t.status };
+  try {
+    const i = await getVideoInfo(id);
+    if ((i as any).error) return { id, label: `#${id}`, status: "error", error: (i as any).error };
+    const t = addTask("hanime1", "video", `${i.title || id} [video]`, id);
+    return { id, label: t.label, status: t.status };
+  } catch (e: any) { return { id, label: `#${id}`, status: "error", error: e.message || String(e) }; }
 });
 app.post("/api/dl/playlist/:id", async ({ params: { id } }) => {
   const r = await getPlaylistVideos(id);
@@ -955,7 +959,29 @@ app.post("/api/dlcancel/:id", ({ params: { id } }) => {
   return cancelTask(id) ? { ok: true } : { error: "not found" };
 });
 app.post("/api/dlclear", () => { clearDone(); return { ok: true }; });
-app.get("/api/dlstatus", () => dlQueue);
+app.get("/api/dlstatus", ({ headers }) => {
+  const l = gl(headers);
+  if (dlQueue.length === 0) return new Response(`<div class="emp" style="padding:12px"><span style="opacity:.5">${l==='zh'?'暂无下载任务':'No downloads'}</span></div>`, { headers: { "Content-Type": "text/html" } });
+  const items = dlQueue.slice(0, 20).map(t => {
+    const pct = t.progress || "";
+    const isRunning = t.status === "running";
+    const isDone = t.status === "done";
+    const clr = isDone ? "var(--green)" : t.status === "error" ? "var(--accent)" : "var(--fg4)";
+    const w = isDone ? "100%" : isRunning ? (pct.match?.(/(\\d+\\.?\\d*)%/) ? RegExp.$1 + "%" : "2%") : "0%";
+    const label = `${esc(t.label)}${t.quality ? " ["+t.quality+"]" : ""}`;
+    return `<div style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;font-size:.68rem;margin-bottom:3px">
+        <span style="color:${clr};font-family:var(--mono);font-size:.62rem">${isDone?'OK':t.status==='error'?'ERR':t.status==='running'?'RUN':'QUE'}</span>
+        <span style="color:var(--fg4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70%">${label}</span>
+      </div>
+      <div style="height:4px;border-radius:4px;background:var(--bg3);overflow:hidden">
+        <div style="height:100%;width:${w};background:${isRunning?'var(--accent)':clr};border-radius:4px;${isRunning?'animation:dl-pulse 1.5s ease-in-out infinite':''}"></div>
+      </div>
+      ${pct?`<div style="font-size:.58rem;color:var(--fg4);margin-top:2px">${esc(pct)}</div>`:''}
+    </div>`;
+  }).join("");
+  return new Response(items, { headers: { "Content-Type": "text/html" } });
+});
 
 const port = process.env.PORT ? parseInt(process.env.PORT) : PORT;
 app.listen(port);

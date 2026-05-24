@@ -256,14 +256,18 @@ class EngineHandler(BaseHTTPRequestHandler):
             elif action == "user_name":
                 uid = request.get("user_id", "")
                 try:
-                    r = self.scraper.get(f"{BASE_URL}/user/{uid}/uploaded", timeout=15)
-                    if r.status_code == 200:
-                        m = re.search(r"<h3[^>]*>(.*?)</h3>", r.text)
-                        name = m.group(1).strip() if m else f"User {uid}"
-                        result["name"] = name
-                        result["user_id"] = uid
+                    # Try user main page (more reliable for author name)
+                    for u in [f"{BASE_URL}/user/{uid}", f"{BASE_URL}/user/{uid}/playlists"]:
+                        r = self.scraper.get(u, timeout=15)
+                        if r.status_code == 200:
+                            m = re.search(r'<h3[^>]*>(.*?)</h3>', r.text)
+                            if m: name = m.group(1).strip(); break
+                            m = re.search(r'<title>(.*?)</title>', r.text)
+                            if m: name = m.group(1).strip(); break
                     else:
-                        result["name"] = f"User {uid}"
+                        name = f"User {uid}"
+                    result["name"] = name
+                    result["user_id"] = uid
                 except Exception as e:
                     result["name"] = f"User {uid}"
                     result["error"] = str(e)
