@@ -1135,7 +1135,7 @@ function checkStorage(cfgIn?: any): string {
     if (c.protocol === "webdav" || c.protocol === "ftp") {
       const code = parseInt(out);
       if (code >= 200 && code < 400) return "ok";
-      return out.slice(0, 200) || `HTTP ${code}`;
+      return `HTTP ${out || code} on ${remote}`;
     }
     // SMB: exitCode === 0 means ok
     return r.exitCode === 0 ? "ok" : (out.slice(0, 200) || "smb connect failed");
