@@ -521,7 +521,7 @@ function settingsPage(lang: Lang, saved?: boolean, pwdMsg?: string, storageMsg?:
     </form>
   </div>
 </div></div>
-<div class="bento-p mb20">
+<div class="bento-p mt20 mb20">
   <div class="bento-h"><div class="bento-hl">${I.dl2} ${lang==='zh'?'存储设置':'Storage Settings'}</div></div>
   <div class="bento-b" style="padding:20px">
     ${typeof storageMsg !== 'undefined' && storageMsg ? `<div style="background:${(storageMsg as string).startsWith('!')?'var(--red-dim)':'var(--green-dim)'};color:${(storageMsg as string).startsWith('!')?'var(--red)':'var(--green)'};padding:10px 16px;border-radius:var(--r-sm);font-size:.75rem;margin-bottom:16px;border:1px solid ${(storageMsg as string).startsWith('!')?'var(--red)':'var(--green)'};font-family:var(--mono)">${storageMsg.replace(/^!/,'')}</div>` : ''}
@@ -555,6 +555,18 @@ function settingsPage(lang: Lang, saved?: boolean, pwdMsg?: string, storageMsg?:
       </div>
       <div style="font-size:.7rem;color:var(--fg4);margin-bottom:16px;line-height:1.5">${lang==='zh'?'支持 WebDAV、SMB/CIFS、FTP。选择"本地"使用默认下载目录。下载完成后自动将文件传输到远程存储。':'Supports WebDAV, SMB/CIFS, FTP. Select "Local" to use default downloads directory. Files auto-transfer after download.'}</div>
       <button type="submit" class="btn btn-p">${lang==='zh'?'保存配置':'Save Config'}</button>
+      <button type="button" class="btn btn-g btn-sm" style="margin-left:8px" id="st-test-btn" onclick="
+        var b=document.getElementById('st-test-btn');b.disabled=true;b.textContent='...';
+        fetch('/api/storage/test').then(r=>r.json()).then(d=>{
+          var m=document.getElementById('st-test-msg');
+          if(!m){m=document.createElement('div');m.id='st-test-msg';var p=b.parentNode;p.insertBefore(m,b.nextSibling);}
+          m.style.cssText='margin-top:10px;padding:8px 14px;border-radius:6px;font-size:.72rem;font-family:var(--mono)';
+          if(d.ok){m.style.background='var(--green-dim)';m.style.color='var(--green)';m.style.border='1px solid var(--green)';m.textContent='${lang==='zh'?'连接成功':'Connected'}';}
+          else{m.style.background='var(--accent-dim)';m.style.color='var(--accent)';m.style.border='1px solid var(--accent)';m.textContent='${lang==='zh'?'连接失败: ':'Failed: '}'+(d.error||'unknown');}
+          b.disabled=false;b.textContent='${lang==='zh'?'测试连接':'Test Connection'}';
+          setTimeout(function(){if(m)m.remove()},5000);
+        }).catch(function(e){b.disabled=false;b.textContent='${lang==='zh'?'测试连接':'Test Connection'}';alert('Error: '+(e.message||e))})
+      ">${lang==='zh'?'测试连接':'Test Connection'}</button>
     </form>
   </div>
 </div></div>`;
@@ -679,6 +691,14 @@ app.post("/api/storage", async ({ body, headers }) => {
     ? (status === "ok" ? `${l==='zh'?'存储已连接':'Storage connected'}` : `!${l==='zh'?'连接失败: ':'Connection failed: '}${status}`)
     : `${l==='zh'?'已保存（未启用）':'Saved (not enabled)'}`;
   return hx(settingsPage(l, false, undefined, msg), l, l==='zh'?'设置':'Settings', "s", headers);
+});
+
+// Storage connection test
+app.get("/api/storage/test", ({ headers }) => {
+  if (!isAuthed(headers)) return Response.redirect("/login", 302);
+  const status = checkStorage();
+  if (status === "ok") return { ok: true };
+  return { ok: false, error: status };
 });
 
 app.post("/api/rss-interval", async ({ body, headers }) => {
