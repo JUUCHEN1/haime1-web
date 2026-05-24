@@ -793,6 +793,18 @@ app.get("/api/dc/preview/video/:id", async ({ params: { id }, headers }) => {
   if (info.error) return new Response(`<div class="emp"><div class="emp-icon">${I.no}</div><div class="emp-t">${t("dc_no_result", l)}</div><div class="emp-d" style="font-family:var(--mono);font-size:.65rem;opacity:.6;margin-top:8px">${esc(info.error)}</div></div>`, { headers: { "Content-Type": "text/html" } });
   const q = info.qualities || Object.keys(info.videos || {});
   if (!q.length) return new Response(`<div class="emp"><div class="emp-icon">${I.film}</div><div class="emp-t">${t("dc_no_result", l)}</div></div>`, { headers: { "Content-Type": "text/html" } });
+  // Fetch tags+description from engine (inline, no HTMX)
+  let tagsHtml = "";
+  try {
+    const ENGINE = process.env.ENGINE_URL || "http://127.0.0.1:5001";
+    const tr = await fetch(ENGINE, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "video_tags", video_id: id }) });
+    if (tr.ok) {
+      const td = await tr.json() as any;
+      const tagSpans = (td.tags || []).map((t: string) => `<span class="qt" style="font-size:.62rem;padding:2px 8px;border:1px solid var(--bd);background:var(--bg2)">${esc(t)}</span>`).join(" ");
+      const desc = td.description ? `<div style="margin-top:6px;opacity:.75;line-height:1.6;max-width:55ch">${esc(td.description)}</div>` : "";
+      if (tagSpans || desc) tagsHtml = `<div class="mt8" style="font-size:.7rem;color:var(--fg4)">${tagSpans}${desc}</div>`;
+    }
+  } catch {}
   return new Response(`<div class="bento-p" style="animation:scaleIn .3s var(--ease) both;overflow:visible">
   <div class="bento-b" style="padding:24px">
   <div class="dg">
@@ -801,10 +813,7 @@ app.get("/api/dc/preview/video/:id", async ({ params: { id }, headers }) => {
       <h1 class="dt">${esc(info.title)}</h1>
       <div class="dm">#${info.video_id}</div>
       <div class="dq">${q.map(qq => `<span class="qt">${qq}</span>`).join("")}</div>
-      <div id="vtags-${info.video_id}" class="mt8" style="font-size:.7rem;color:var(--fg4);line-height:1.6;max-width:50ch"
-        hx-get="/api/video/tags/${info.video_id}" hx-trigger="load" hx-swap="innerHTML">
-        <span style="opacity:.5">${l==='zh'?'加载标签...':'Loading tags...'}</span>
-      </div>
+      ${tagsHtml}
       <div class="da mt12">
         <select class="inp" id="dc-q" style="width:90px">${q.map((qq,i) => `<option value="${qq}" ${i===0?'selected':''}>${qq}</option>`).join("")}</select>
         <button class="btn btn-p btn-sm" data-dl="video:${info.video_id}">${I.dl} ${t("dl_btn", l)}</button>
