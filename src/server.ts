@@ -326,9 +326,9 @@ function vlPage(videos: string[], title: string, backUrl: string, lang: Lang, dl
   ${pgHtml || ""}${dlBtns || ""}
   <div class="bento-p"><div class="bento-b stagger">${videos.map(v => `<div class="li" style="cursor:default">
     <div class="li-th"><img src="/api/cover/${v}" loading="lazy" style="width:100%;height:100%;object-fit:cover" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span style="display:none;font-size:.6rem;color:var(--fg4);font-family:var(--mono);align-items:center;justify-content:center;width:100%;height:100%">#${v}</span></div>
-    <div class="li-bd"><div class="li-t" id="ti-${v}">Video #${v}</div><div class="li-m" style="font-family:var(--mono)">#${v}</div></div>
+    <div class="li-bd"><div class="li-t" id="ti-${v}" hx-get="/api/video/title/${v}" hx-trigger="load" hx-swap="innerHTML">#${v}</div><div class="li-m" style="font-family:var(--mono)">#${v}</div></div>
     <div class="li-act btn-grp">
-      <select class="inp" style="width:68px;padding:3px 4px;font-size:.64rem;font-family:var(--mono)" onchange="this.nextElementSibling.setAttribute('data-dl','video:${v}:'+this.value)"><option value="">720p</option><option>1080p</option><option selected>720p</option><option>480p</option><option>360p</option></select>
+      <select class="inp" style="width:68px;padding:3px 4px;font-size:.64rem;font-family:var(--mono)" onchange="this.nextElementSibling.setAttribute('data-dl','video:${v}:'+this.value)"><option value="">1080p</option><option selected>1080p</option><option>720p</option><option>480p</option><option>360p</option></select>
       <button class="btn btn-s btn-xs" data-dl="video:${v}:720p" onclick="event.stopPropagation();var d=this.getAttribute('data-dl').split(':');fetch('/api/dl/'+d[0]+'/'+d[1]+'?quality='+d[2],{method:'POST'}).then(r=>r.json()).then(t=>{var s=document.getElementById('dl-s');if(s)s.textContent=_l==='zh'?'已加入: '+t.label:'Queued: '+t.label;setTimeout(()=>location.reload(),800)}).catch(()=>{})">${I.dl}</button>
     </div>
   </div>`).join("")}</div></div>${pgHtml || ""}`;
@@ -377,7 +377,7 @@ function vdPage(info: VideoInfoResult, lang: Lang): string {
         <span style="opacity:.5">${l==='zh'?'加载标签...':'Loading tags...'}</span>
       </div>
       <div class="da mt12">
-        <select class="inp" id="dc-q" style="width:90px"><option value="">720p</option><option>2160p</option><option>1080p</option><option selected>720p</option><option>480p</option><option>360p</option></select>
+        <select class="inp" id="dc-q" style="width:90px">${q.map((qq,i) => `<option value="${qq}" ${i===0?'selected':''}>${qq}</option>`).join("")}</select>
         <button class="btn btn-p btn-sm" data-dl="video:${info.video_id}">${I.dl} ${t("dl_btn",lang)}</button>
         <a href="/api/dlurl/${info.video_id}" class="btn btn-s btn-sm">${I.dl} Direct</a>
       </div>
@@ -802,7 +802,7 @@ app.get("/api/dc/preview/video/:id", async ({ params: { id }, headers }) => {
       <div class="dm">#${info.video_id}</div>
       <div class="dq">${q.map(qq => `<span class="qt">${qq}</span>`).join("")}</div>
       <div class="da mt12">
-        <select class="inp" id="dc-q" style="width:90px"><option value="">720p</option><option>2160p</option><option>1080p</option><option selected>720p</option><option>480p</option><option>360p</option></select>
+        <select class="inp" id="dc-q" style="width:90px">${q.map((qq,i) => `<option value="${qq}" ${i===0?'selected':''}>${qq}</option>`).join("")}</select>
         <button class="btn btn-p btn-sm" data-dl="video:${info.video_id}">${I.dl} ${t("dl_btn", l)}</button>
         <a href="/video/${info.video_id}" class="btn btn-g btn-sm">${I.info} Detail</a>
       </div>
@@ -872,6 +872,12 @@ app.get("/api/cnt/:id", async ({ params: { id } }) => {
   const r = await getPlaylistVideos(id);
   return `${r.count || 0}`;
 });
+// Video title (lightweight - no cover fetch)
+app.get("/api/video/title/:id", async ({ params: { id } }) => {
+  const info = await getVideoInfo(id);
+  return new Response(esc(info.title || `Video #${id}`), { headers: { "Content-Type": "text/html" } });
+});
+
 app.get("/api/thumb/:id", async ({ params: { id } }) => {
   const i = await getVideoInfo(id);
   if (i.cover_url) return `<img src="${esc(i.cover_url)}" style="width:100%;height:100%;object-fit:cover" alt="">`;
