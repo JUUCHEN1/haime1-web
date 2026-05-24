@@ -801,6 +801,10 @@ app.get("/api/dc/preview/video/:id", async ({ params: { id }, headers }) => {
       <h1 class="dt">${esc(info.title)}</h1>
       <div class="dm">#${info.video_id}</div>
       <div class="dq">${q.map(qq => `<span class="qt">${qq}</span>`).join("")}</div>
+      <div id="vtags-${info.video_id}" class="mt8" style="font-size:.7rem;color:var(--fg4);line-height:1.6;max-width:50ch"
+        hx-get="/api/video/tags/${info.video_id}" hx-trigger="load" hx-swap="innerHTML">
+        <span style="opacity:.5">${l==='zh'?'加载标签...':'Loading tags...'}</span>
+      </div>
       <div class="da mt12">
         <select class="inp" id="dc-q" style="width:90px">${q.map((qq,i) => `<option value="${qq}" ${i===0?'selected':''}>${qq}</option>`).join("")}</select>
         <button class="btn btn-p btn-sm" data-dl="video:${info.video_id}">${I.dl} ${t("dl_btn", l)}</button>

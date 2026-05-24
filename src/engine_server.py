@@ -226,8 +226,10 @@ class EngineHandler(BaseHTTPRequestHandler):
         if video_id in self._video_cache and (now - self._cache_time.get(video_id, 0)) < self.CACHE_TTL:
             return self._video_cache[video_id]
         info = action_video_info(self.scraper, video_id)
-        self._video_cache[video_id] = info
-        self._cache_time[video_id] = now
+        # Only cache successful results (don't cache errors/retries)
+        if "error" not in info:
+            self._video_cache[video_id] = info
+            self._cache_time[video_id] = now
         return info
 
     def _ensure_scraper(self):
