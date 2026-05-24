@@ -14,13 +14,18 @@ import sys
 import time
 import warnings
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
+
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    """Multi-threaded HTTP server so multiple requests don't block each other"""
+    daemon_threads = True
 
 import cloudscraper
 
 warnings.filterwarnings("ignore")
 
-MAX_RETRIES = 5
-RETRY_DELAY = 3
+MAX_RETRIES = 2
+RETRY_DELAY = 1
 BASE_URL = "https://hanime1.me"
 
 
@@ -91,7 +96,7 @@ def extract_video_ids(html: str) -> list[str]:
 
 def action_user_playlists(scraper, user_id: str):
     url = f"{BASE_URL}/user/{user_id}/playlists"
-    r = scraper.get(url, timeout=30)
+    r = scraper.get(url, timeout=20)
     print(f"[engine] user_playlists {user_id}: HTTP {r.status_code} len={len(r.text)}", file=sys.stderr, flush=True)
     if r.status_code != 200:
         return {"error": f"HTTP {r.status_code}", "playlists": []}
@@ -108,7 +113,7 @@ def action_user_playlists(scraper, user_id: str):
 def action_playlist_videos(scraper, playlist_id: str):
     url = f"{BASE_URL}/playlist?list={playlist_id}"
     for i in range(MAX_RETRIES):
-        r = scraper.get(url, timeout=30)
+        r = scraper.get(url, timeout=20)
         print(f"[engine] playlist_videos {playlist_id} attempt {i+1}: HTTP {r.status_code} len={len(r.text)}", file=sys.stderr, flush=True)
         if r.status_code == 200:
             ids = extract_video_ids(r.text)
@@ -130,7 +135,7 @@ def action_playlist_videos(scraper, playlist_id: str):
 def action_video_info(scraper, video_id: str):
     url = f"{BASE_URL}/download?v={video_id}"
     for i in range(MAX_RETRIES):
-        r = scraper.get(url, timeout=30)
+        r = scraper.get(url, timeout=20)
         print(f"[engine] video_info {video_id} attempt {i+1}: HTTP {r.status_code} len={len(r.text)}", file=sys.stderr, flush=True)
         if r.status_code == 200:
             title_match = re.search(r'<h3[^>]*>(.*?)</h3>', r.text, re.DOTALL)
@@ -174,7 +179,7 @@ def action_user_uploaded(scraper, user_id: str, page=1):
             url = f"{BASE_URL}/user/{user_id}/uploaded"
             if page_num > 1:
                 url += f"?page={page_num}"
-            r = scraper.get(url, timeout=30)
+            r = scraper.get(url, timeout=20)
             if r.status_code != 200:
                 break
             ids = set(re.findall(r'href="https://hanime1\.me/watch\?v=(\d+)"', r.text))
@@ -188,7 +193,7 @@ def action_user_uploaded(scraper, user_id: str, page=1):
         url = f"{BASE_URL}/user/{user_id}/uploaded"
         if page_num > 1:
             url += f"?page={page_num}"
-        r = scraper.get(url, timeout=30)
+        r = scraper.get(url, timeout=20)
         if r.status_code != 200:
             return {"user_id": user_id, "videos": [], "count": 0, "page": page_num, "error": f"HTTP {r.status_code}"}
         ids = sorted(set(re.findall(r'href="https://hanime1\.me/watch\?v=(\d+)"', r.text)))
@@ -342,7 +347,7 @@ class EngineHandler(BaseHTTPRequestHandler):
 
 def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5001
-    server = HTTPServer(("0.0.0.0", port), EngineHandler)
+    server = ThreadingHTTPServer(("0.0.0.0", port), EngineHandler)
     print(f"[engine] HTTP engine ready on port {port} (cloudscraper {cloudscraper.__version__})", flush=True)
     try:
         server.serve_forever()
