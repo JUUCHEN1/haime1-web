@@ -526,31 +526,41 @@ function settingsPage(lang: Lang, saved?: boolean, pwdMsg?: string, storageMsg?:
   <div class="bento-b" style="padding:20px">
     ${typeof storageMsg !== 'undefined' && storageMsg ? `<div style="background:${(storageMsg as string).startsWith('!')?'var(--red-dim)':'var(--green-dim)'};color:${(storageMsg as string).startsWith('!')?'var(--red)':'var(--green)'};padding:10px 16px;border-radius:var(--r-sm);font-size:.75rem;margin-bottom:16px;border:1px solid ${(storageMsg as string).startsWith('!')?'var(--red)':'var(--green)'};font-family:var(--mono)">${storageMsg.replace(/^!/,'')}</div>` : ''}
     <form method="POST" action="/api/storage">
-      <div style="margin-bottom:16px">
-        <label style="display:block;font-size:.72rem;color:var(--fg3);margin-bottom:6px;font-family:var(--mono);letter-spacing:.04em">${lang==='zh'?'协议':'Protocol'}</label>
+      <div style="margin-bottom:14px">
+        <label class="lbl2">${lang==='zh'?'协议':'Protocol'}</label>
         <select name="protocol" class="inp" style="width:100%">
-          <option value="local" ${stCfg.protocol==='local'?'selected':''}>${lang==='zh'?'本地 / 默认':'Local / Default'}</option>
           <option value="webdav" ${stCfg.protocol==='webdav'?'selected':''}>WebDAV</option>
           <option value="smb" ${stCfg.protocol==='smb'?'selected':''}>SMB / CIFS</option>
           <option value="ftp" ${stCfg.protocol==='ftp'?'selected':''}>FTP</option>
+          <option value="local" ${stCfg.protocol==='local'?'selected':''}>${lang==='zh'?'本地（默认）':'Local (default)'}</option>
         </select>
       </div>
-      <div style="display:flex;gap:10px;margin-bottom:16px">
-        <div style="flex:1"><label style="display:block;font-size:.72rem;color:var(--fg3);margin-bottom:6px;font-family:var(--mono);letter-spacing:.04em">${lang==='zh'?'主机':'Host'}</label><input name="host" class="inp" placeholder="192.168.1.100" value="${esc(stCfg.host)}"></div>
-        <div style="width:80px"><label style="display:block;font-size:.72rem;color:var(--fg3);margin-bottom:6px;font-family:var(--mono);letter-spacing:.04em">${lang==='zh'?'端口':'Port'}</label><input name="port" class="inp" placeholder="" value="${esc(stCfg.port)}"></div>
+      <div style="margin-bottom:14px">
+        <label class="lbl2">${lang==='zh'?'服务器地址':'Server Address'}</label>
+        <input name="host" class="inp" placeholder="http://192.168.1.100:5005 或 //NAS/share" value="${esc(stCfg.host)}">
       </div>
-      <div style="display:flex;gap:10px;margin-bottom:16px">
-        <div style="flex:1"><label style="display:block;font-size:.72rem;color:var(--fg3);margin-bottom:6px;font-family:var(--mono);letter-spacing:.04em">${lang==='zh'?'用户名':'Username'}</label><input name="username" class="inp" placeholder="" value="${esc(stCfg.username)}"></div>
-        <div style="flex:1"><label style="display:block;font-size:.72rem;color:var(--fg3);margin-bottom:6px;font-family:var(--mono);letter-spacing:.04em">${lang==='zh'?'密码':'Password'}</label><input name="password" type="password" class="inp" placeholder="" value="${esc(stCfg.password)}"></div>
+      <div style="margin-bottom:14px">
+        <label class="lbl2">${lang==='zh'?'用户名':'Username'}</label>
+        <input name="username" class="inp" placeholder="" value="${esc(stCfg.username)}">
       </div>
-      <div style="margin-bottom:16px">
-        <label style="display:block;font-size:.72rem;color:var(--fg3);margin-bottom:6px;font-family:var(--mono);letter-spacing:.04em">${lang==='zh'?'远程路径':'Remote Path'}</label>
-        <input name="path" class="inp" placeholder="/downloads/anime" value="${esc(stCfg.path)}">
+      <div style="margin-bottom:14px">
+        <label class="lbl2">${lang==='zh'?'密码':'Password'}</label>
+        <input name="password" type="password" class="inp" placeholder="" value="${esc(stCfg.password)}">
       </div>
-      <div style="margin-bottom:16px">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.75rem;color:var(--fg3)">
-          <input type="checkbox" name="enabled" value="1" ${stCfg.enabled?'checked':''} style="width:16px;height:16px;accent-color:var(--accent)">
-          ${lang==='zh'?'启用远程存储（下载完成后自动同步）':'Enable remote storage (auto-sync after download)'}
+      <div style="margin-bottom:14px">
+        <label class="lbl2">${lang==='zh'?'远程路径':'Remote Path'}</label>
+        <input name="path" class="inp" placeholder="WebDAV: /remote.php/dav/files/user/  SMB: sharename  FTP: /public_html/" value="${esc(stCfg.path)}">
+      </div>
+      <div style="margin-bottom:14px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.72rem;color:var(--fg3)">
+          <input type="checkbox" name="enabled" value="1" ${stCfg.enabled?'checked':''} style="width:15px;height:15px;accent-color:var(--accent)">
+          ${lang==='zh'?'启用（下载完成后自动同步到远程）':'Enable (auto-sync after download)'}
+        </label>
+      </div>
+      <div style="margin-bottom:14px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.72rem;color:var(--fg3)">
+          <input type="checkbox" name="direct" value="1" ${(stCfg as any).direct?'checked':''} style="width:15px;height:15px;accent-color:var(--accent)">
+          ${lang==='zh'?'直连远程（不保留本地副本）':'Direct to remote (no local copy)'}
         </label>
       </div>
       <div style="font-size:.7rem;color:var(--fg4);margin-bottom:16px;line-height:1.5">${lang==='zh'?'支持 WebDAV、SMB/CIFS、FTP。选择"本地"使用默认下载目录。下载完成后自动将文件传输到远程存储。':'Supports WebDAV, SMB/CIFS, FTP. Select "Local" to use default downloads directory. Files auto-transfer after download.'}</div>
@@ -679,11 +689,11 @@ app.post("/api/storage", async ({ body, headers }) => {
   const cfg: any = {
     protocol: String(raw?.protocol || "local"),
     host: String(raw?.host || ""),
-    port: String(raw?.port || ""),
     username: String(raw?.username || ""),
     password: String(raw?.password || ""),
     path: String(raw?.path || "/downloads"),
     enabled: raw?.enabled === "1" || raw?.enabled === true,
+    direct: raw?.direct === "1" || raw?.direct === true,
   };
   saveStorage(cfg);
   const status = checkStorage();
@@ -1085,17 +1095,38 @@ function saveStorage(cfg: StorageConfig): void {
 function checkStorage(): string {
   const c = loadStorage();
   if (!c.enabled || c.protocol === "local") return "ok";
-  // Test connectivity with curl (WebDAV/FTP) or smbclient (SMB)
   try {
-    const cmd = c.protocol === "smb"
-      ? `smbclient -c 'ls' //${c.host}/${c.path} ${c.password ? '-U '+c.username+'%'+c.password : '-N'} 2>&1`
-      : c.protocol === "webdav"
-      ? `curl -sf -u ${c.username}:${c.password} -X PROPFIND "${c.host}${c.path}" 2>&1`
-      : c.protocol === "ftp"
-      ? `curl -sf -u ${c.username}:${c.password} "ftp://${c.host}${c.path}" 2>&1`
-      : "echo ok";
-    const r = Bun.spawnSync(["sh", "-c", cmd], { timeout: 8000 });
-    return r.exitCode === 0 ? "ok" : (r.stderr ? new TextDecoder().decode(r.stderr).slice(0,200) : "connect failed");
+    let cmd = "";
+    // Build URL from host (auto-add scheme if missing)
+    let url = c.host || "";
+    if (c.protocol === "webdav" && !url.startsWith("http")) {
+      url = "http://" + url;
+    }
+    if (c.protocol === "ftp" && !url.startsWith("ftp")) {
+      url = "ftp://" + url.replace(/^\/*/, "");
+    }
+    const remote = url + (c.path || "");
+    const creds = c.username ? `-u "${c.username}:${c.password}"` : "";
+    if (c.protocol === "webdav") {
+      cmd = `curl -s -o /dev/null -w "%{http_code}" ${creds} -X PROPFIND "${remote}" 2>&1`;
+    } else if (c.protocol === "smb") {
+      const smbAuth = c.username ? `-U "${c.username}%${c.password}"` : "-N";
+      const smbPath = `//${c.host}/${c.path}`;
+      cmd = `smbclient ${smbAuth} -c 'ls' "${smbPath}" 2>&1`;
+    } else if (c.protocol === "ftp") {
+      cmd = `curl -s -o /dev/null -w "%{http_code}" ${creds} "${remote}" 2>&1`;
+    }
+    if (!cmd) return "unknown protocol";
+    const r = Bun.spawnSync(["sh", "-c", cmd], { timeout: 10000 });
+    const out = new TextDecoder().decode(r.stdout || r.stderr || new Uint8Array()).trim();
+    // HTTP codes: 2xx = ok for webdav/ftp
+    if (c.protocol === "webdav" || c.protocol === "ftp") {
+      const code = parseInt(out);
+      if (code >= 200 && code < 400) return "ok";
+      return out.slice(0, 200) || `HTTP ${code}`;
+    }
+    // SMB: exitCode === 0 means ok
+    return r.exitCode === 0 ? "ok" : (out.slice(0, 200) || "smb connect failed");
   } catch (e: any) { return e.message || "error"; }
 }
 
