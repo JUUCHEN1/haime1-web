@@ -1120,7 +1120,8 @@ function checkStorage(cfgIn?: any): string {
     const remote = url + (c.path || "");
     const creds = c.username ? `-u "${c.username}:${c.password}"` : "";
     if (c.protocol === "webdav") {
-      cmd = `curl -sv --connect-timeout 8 -o /tmp/wdtest.txt -w "\\nHTTP_CODE:%{http_code}\\n" ${creds} -X PROPFIND "${remote}" 2>&1; echo "---STDOUT---"; cat /tmp/wdtest.txt 2>/dev/null; rm -f /tmp/wdtest.txt`;
+      // First try a simple GET to check server reachability
+      cmd = `curl -sv --connect-timeout 8 -o /tmp/wdtest.txt -w "\\nHTTP_CODE:%{http_code}\\n" ${creds} "${remote}" 2>&1; echo "---BODY---"; cat /tmp/wdtest.txt 2>/dev/null | head -20; rm -f /tmp/wdtest.txt; echo "---"; curl -sv --connect-timeout 8 -o /dev/null -w "\\nPROPFIND_CODE:%{http_code}\\n" ${creds} -X PROPFIND "${remote}" 2>&1`;
     } else if (c.protocol === "smb") {
       const smbAuth = c.username ? `-U "${c.username}%${c.password}"` : "-N";
       const smbPath = `//${c.host}/${c.path}`;
