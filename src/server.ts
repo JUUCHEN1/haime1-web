@@ -202,8 +202,8 @@ function shell(title: string, body: string, nav: string, lang: Lang): Response {
 <div class="main-body" id="main-body">${body}</div></div>
 <nav class="mobile-nav">
   <a href="/" class="${nav==='h'?'active':''}">${I.home}<span>${t("home",lang)}</span></a>
-  <a href="/dc/video" class="${nav==='cv'?'active':''}" hx-get="/dc/video" hx-target="#main-body" hx-push-url="true">${I.film}<span>${t("dc_single",lang)}</span></a>
-  <a href="/rss" class="${nav==='rs'?'active':''}">${I.up}<span>${t("rss",lang)}</span></a>
+  <a href="/dc/video" class="${nav==='cv'?'active':''}">${I.film}<span>${t("dc_single",lang)}</span></a>
+  <a href="/dc/user" class="${nav==='cu'?'active':''}">${I.usr}<span>${t("dc_user",lang)}</span></a>
   <a href="/downloads" class="${nav==='d'?'active':''}">${I.dl2}<span>${t("dl",lang)}</span></a>
   <a href="/settings" class="${nav==='s'?'active':''}">${I.zz}<span>${lang==='zh'?'设置':'Settings'}</span></a>
 </nav>
@@ -287,14 +287,6 @@ function homePage(lang: Lang): string {
       <span style="font-size:.6rem;color:var(--fg4);margin-left:8px;font-family:var(--mono)" id="rss-dash-time">${rssCfg.interval_seconds > 0 ? `${lang==='zh'?'自动每':'Auto every'} ${rssCfg.interval_seconds >= 3600 ? rssCfg.interval_seconds/3600 + 'h' : rssCfg.interval_seconds + 's'}` : (lang==='zh'?'仅手动':'Manual only')}</span>
     </div>
   </div><div class="bento bento-31">
-    <div class="bento-p">
-      <div class="bento-h"><div class="bento-hl">${I.grid} ${t("quick",lang)}</div></div>
-      <div class="bento-b stagger">
-        <a href="/dc/video" class="li"><div class="li-th" style="background:var(--green-dim);color:var(--green);font-family:var(--mono)">DC</div><div class="li-bd"><div class="li-t">${t("dc_single",lang)}</div><div class="li-m">URL / ID → ${t("dc_preview",lang)} → Download</div></div><div class="li-act">${I.ch}</div></a>
-        <a href="/downloads" class="li" hx-get="/downloads" hx-target="#main-body" hx-push-url="true"><div class="li-th" style="background:var(--blue-dim);color:var(--blue)">DL</div><div class="li-bd"><div class="li-t">${t("dl",lang)}</div><div class="li-m">${running} ${t("dl_run",lang)} · ${done} ${t("dl_done",lang)}</div></div><div class="li-act">${I.ch}</div></a>
-        <div class="li" style="cursor:default"><div class="li-th" style="background:var(--accent-dim);color:var(--accent);font-family:var(--mono)">#1</div><div class="li-bd"><div class="li-t">${t("dl_to",lang)}</div><div class="li-m" style="font-family:var(--mono)">${DL_DIR}</div></div></div>
-      </div>
-    </div>
     <div class="bento-p">
       <div class="bento-h"><div class="bento-hl">${I.info} About</div></div>
       <div class="bento-b" style="padding:18px">
