@@ -261,9 +261,9 @@ class EngineHandler(BaseHTTPRequestHandler):
                         r = self.scraper.get(u, timeout=15)
                         if r.status_code == 200:
                             m = re.search(r'<h3[^>]*>(.*?)</h3>', r.text)
-                            if m: name = m.group(1).strip(); break
+                            if m: name = re.sub(r'<[^>]+>', '', m.group(1)).strip(); break
                             m = re.search(r'<title>(.*?)</title>', r.text)
-                            if m: name = m.group(1).strip(); break
+                            if m: name = re.sub(r'<[^>]+>', '', m.group(1)).strip(); break
                     else:
                         name = f"User {uid}"
                     result["name"] = name

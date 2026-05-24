@@ -179,7 +179,8 @@ const I = {
 
 // ─── Client JS ──────────────────────────────────────────────
 const i18nJS = (lang: Lang) => `<script>var _l='${lang}';function setLang(l){document.cookie='lang='+l+';path=/;max-age=31536000';localStorage.setItem('lang',l);location.reload()}
-document.addEventListener('click',function(e){var b=e.target.closest('[data-dl]');if(!b)return;var d=b.getAttribute('data-dl').split(':');var type=d[0],id=d[1],qAttr=d[2]||'';(function(){var q=qAttr;var s=document.getElementById('dc-q');if(s&&s.value)q=s.value;return fetch('/api/dl/'+type+'/'+id+(q?'?quality='+q:''),{method:'POST'})})().then(function(r){if(!r.ok)throw new Error(r.status+' '+r.statusText);return r.json()}).then(function(t){if(t.error){alert(_l==='en'?'Download error: '+t.error:'下载失败: '+t.error);return;}alert(_l==='en'?'Queued: '+t.label:'已加入下载队列: '+t.label);setTimeout(function(){location.reload()},800)}).catch(function(e){alert(_l==='en'?'Download failed: '+e.message:'下载失败: '+e.message)})});
+document.addEventListener('click',function(e){var b=e.target.closest('[data-dl]');if(!b)return;var d=b.getAttribute('data-dl').split(':');var type=d[0],id=d[1],qAttr=d[2]||'';var btn=b;btn.disabled=true;var txt=btn.textContent;(function(){var q=qAttr;var s=document.getElementById('dc-q');if(s&&s.value)q=s.value;return fetch('/api/dl/'+type+'/'+id+(q?'?quality='+q:''),{method:'POST'})})().then(function(r){if(!r.ok)throw new Error(r.status+' '+r.statusText);return r.json()}).then(function(t){if(t.error){showMsg('error',_l==='en'?'Download error: '+t.error:'\u4e0b\u8f7d\u5931\u8d25: '+t.error);btn.disabled=false;btn.textContent=txt;return;}showMsg('ok',_l==='en'?'Queued: '+t.label:'\u5df2\u52a0\u5165\u961f\u5217: '+t.label);setTimeout(function(){location.reload()},1500)}).catch(function(e){showMsg('error',_l==='en'?'Download failed: '+e.message:'\u4e0b\u8f7d\u5931\u8d25: '+e.message);btn.disabled=false;btn.textContent=txt})});
+function showMsg(type,text){var m=document.getElementById('dl-msg');if(!m)return;m.textContent=text;m.className='toast toast-'+type;m.style.display='block';setTimeout(function(){m.style.display='none'},2500)}
 function dcPreview(type){var inp=document.getElementById('dc-inp');var raw=(inp&&inp.value||'').trim();if(!raw){alert(_l==='zh'?'请输入URL或ID':'Enter URL or ID');return;}var id=raw;var m;if(type==='video'){m=raw.match(/v=([0-9]+)/);id=m?m[1]:raw;}else if(type==='user'){var p=raw.split('/user/');id=p[p.length-1]||raw;}id=String(id).replace(/[^0-9]/g,'');if(!id){alert(_l==='zh'?'无法识别ID':'Cannot recognize ID');return;}var btn=document.getElementById('dc-preview-btn');var pre=document.getElementById('dc-preview');if(btn){btn.disabled=true;btn.textContent='...';}if(pre)pre.innerHTML='<div class="emp"><div class="skel skel-t" style="margin:0 auto"></div><div class="skel skel-m" style="margin:8px auto 0;width:30%"></div></div>';fetch('/api/dc/preview/'+type+'/'+id).then(function(r){return r.text()}).then(function(html){if(pre)pre.innerHTML=html;if(btn){btn.disabled=false;btn.textContent=_l==='zh'?'查看':'Preview';}}).catch(function(e){if(pre)pre.innerHTML='<div class="emp"><div class="emp-t">Error</div><div class="emp-d">'+(e.message||e)+'</div></div>';if(btn){btn.disabled=false;btn.textContent=_l==='zh'?'查看':'Preview';}});}</script>`;
 
 // ─── Shell ──────────────────────────────────────────────────
@@ -200,6 +201,7 @@ function shell(title: string, body: string, nav: string, lang: Lang): Response {
 <a href="/api/logout" class="side-link">${I.back}<span>${lang==='zh'?'登出':'Logout'}</span></a>
 </div><div class="side-foot">${APP} · v4</div></nav>
 <div class="main"><header class="main-hdr"><span class="main-hdr-title">${esc(title)}</span><div class="main-hdr-right">${langBtn(lang)}</div></header>
+<div id="dl-msg" style="display:none;position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:999;padding:10px 20px;border-radius:10px;font-size:.75rem;font-weight:500;letter-spacing:.01em;pointer-events:none;transition:opacity .3s ease;min-width:200px;text-align:center" class="toast"></div><style>.toast-ok{background:var(--green-dim);color:var(--green);border:1px solid var(--green)}.toast-error{background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent)}.dl-bar{height:4px;border-radius:4px;background:var(--bg3);overflow:hidden}.dl-bar-fill{height:100%;border-radius:4px;transition:width .4s ease}</style>
 <div class="main-body" id="main-body">${body}</div></div>
 <nav class="mobile-nav">
   <a href="/" class="${nav==='h'?'active':''}">${I.home}<span>${t("home",lang)}</span></a>
@@ -328,7 +330,7 @@ function vlPage(videos: string[], title: string, backUrl: string, lang: Lang, dl
   <div class="bento-p"><div class="bento-b stagger">${videos.map(v => `<div class="li" style="cursor:default;flex-wrap:wrap">
     <div class="li-th"><img src="/api/cover/${v}" loading="lazy" style="width:100%;height:100%;object-fit:cover" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span style="display:none;font-size:.6rem;color:var(--fg4);font-family:var(--mono);align-items:center;justify-content:center;width:100%;height:100%">#${v}</span></div>
     <div class="li-bd" style="flex:1">
-      <div class="li-t" id="ti-${v}" hx-get="/api/video/title/${v}" hx-trigger="load" hx-swap="innerHTML">#${v}</div>
+      <div class="li-t" id="ti-${v}" hx-get="/api/video/title/${v}" hx-trigger="load" hx-swap="innerHTML" style="min-height:1.2em"><span class="htmx-indicator" style="opacity:.4;font-size:.65rem">...</span> #${v}</div>
       <div class="li-m" style="font-family:var(--mono)">#${v}</div>
       <div id="vtags-${v}" style="display:none;font-size:.62rem;color:var(--fg4);line-height:1.6;padding-top:6px;margin-top:4px;border-top:1px solid var(--bd)"></div>
       <button class="tag-toggle mt4" style="font-size:.56rem;padding:2px 7px;border:1px solid var(--bd2);border-radius:var(--r-sm);background:var(--bg2);color:var(--fg4);cursor:pointer;font-family:var(--mono);letter-spacing:.04em;transition:all var(--tr-fast)"
@@ -407,10 +409,13 @@ function dlPage(lang: Lang): string {
     const statusClr = task.status === 'done' ? 'var(--green)' : task.status === 'error' ? 'var(--accent)' : task.status === 'cancelled' ? 'var(--fg4)' : 'var(--fg4)';
     const statusBg = task.status === 'done' ? 'var(--green-dim)' : task.status === 'error' ? 'var(--accent-dim)' : task.status === 'cancelled' ? 'rgba(128,128,128,.12)' : 'var(--bg3)';
     const statusLabel = task.status === 'done' ? t("dl_done",lang) : task.status === 'error' ? t("dl_err",lang) : task.status === 'cancelled' ? t("dl_cancel",lang) : task.status === 'running' ? t("dl_run",lang) : t("dl_wait",lang);
+    const isRunning = task.status === "running";
+    const progW = task.status === "done" ? "100%" : isRunning ? "15%" : "0%";
     const act = canCancel ? `<button class="btn btn-g btn-xs" onclick="fetch('/api/dlcancel/${task.id}',{method:'POST'}).then(()=>location.reload())">${t("cancel",lang)}</button>` : "";
     return `<div class="li">
       <div class="li-th" style="font-size:.8rem">${icon}</div>
-      <div class="li-bd"><div class="li-t">${label}</div><div class="li-m"><span class="dl-status" style="background:${statusBg};color:${statusClr}">${statusLabel}</span> ${(task.progress || "").slice(0, 55)}</div></div>
+      <div class="li-bd"><div class="li-t">${label}</div><div class="li-m"><span class="dl-status" style="background:${statusBg};color:${statusClr}">${statusLabel}</span> ${(task.progress || "").slice(0, 45)}</div>
+      ${task.status !== "queued" ? `<div class="dl-bar" style="margin-top:6px"><div class="dl-bar-fill" style="width:${progW};background:${isRunning ? "var(--accent)" : statusClr}"></div></div>` : ""}</div>
       ${act ? `<div class="li-act">${act}</div>` : ""}
     </div>`;
   }).join("");
@@ -423,7 +428,7 @@ function dlPage(lang: Lang): string {
     </div>
   </div>
   <div style="font-size:.7rem;color:var(--fg3);font-family:var(--mono);margin-bottom:14px">${t("dl_to",lang)}: ${DL_DIR}</div>
-  <div id="dl-progress" hx-get="/api/dlstatus" hx-trigger="every 2s" hx-swap="innerHTML" style="margin-bottom:16px"><div class="emp" style="padding:12px"><span style="opacity:.5">${lang==='zh'?'加载进度中...':'Loading progress...'}</span></div></div>
+  </div>
   ${dlQueue.length ? `<div class="bento-p"><div class="bento-b">${items}</div></div>` : `<div class="emp"><div class="emp-icon">${I.dl2}</div><div class="emp-t">${t("no_dl",lang)}</div></div>`}`;
 }
 
