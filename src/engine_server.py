@@ -14,11 +14,6 @@ import sys
 import time
 import warnings
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from socketserver import ThreadingMixIn
-
-class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
-    """Multi-threaded HTTP server so multiple requests don't block each other"""
-    daemon_threads = True
 
 import cloudscraper
 
@@ -119,7 +114,7 @@ def action_playlist_videos(scraper, playlist_id: str):
             ids = extract_video_ids(r.text)
             print(f"[engine] playlist_videos {playlist_id}: extracted {len(ids)} video IDs", file=sys.stderr, flush=True)
             if not ids and len(r.text) < 30000 and i < MAX_RETRIES - 1:
-                time.sleep(RETRY_DELAY)
+                time.sleep(1 * (2**i))  # exponential backoff: 1s, 2s, 4s
                 continue
             if not ids:
                 # Debug: check what patterns exist in the HTML
@@ -128,7 +123,7 @@ def action_playlist_videos(scraper, playlist_id: str):
                 print(f"[engine] playlist_videos {playlist_id}: no IDs found, sample hrefs: {hrefs}", file=sys.stderr, flush=True)
             return {"playlist_id": playlist_id, "videos": ids, "count": len(ids)}
         elif r.status_code != 200 and i < MAX_RETRIES - 1:
-            time.sleep(RETRY_DELAY)
+            time.sleep(1 * (2**i))
     return {"playlist_id": playlist_id, "videos": [], "count": 0, "error": "failed after retries"}
 
 
@@ -166,7 +161,7 @@ def action_video_info(scraper, video_id: str):
             time.sleep(wait)
         else:
             if i < MAX_RETRIES - 1:
-                time.sleep(RETRY_DELAY)
+                time.sleep(1 * (2**i))  # exponential backoff
     return {"error": "failed to fetch", "video_id": video_id}
 
 
@@ -220,11 +215,24 @@ def action_download_url(scraper, video_id: str, quality: str = "1080p"):
 class EngineHandler(BaseHTTPRequestHandler):
     scraper = None
     _last_proxy = None
+    _last_request_time = 0.0  # Rate limiter: last hanime1.me request timestamp
+    _min_request_gap = 1.5    # Minimum seconds between requests to avoid rate limiting
 
     # In-memory cache for video_info (avoids repeated cloudscraper calls for thumbnails)
     _video_cache = {}
     _cache_time = {}
     CACHE_TTL = 300  # 5 minutes
+
+    @classmethod
+    def _rate_limit(cls):
+        """Ensure minimum gap between hanime1.me requests to avoid rate limiting."""
+        now = time.time()
+        elapsed = now - cls._last_request_time
+        if elapsed < cls._min_request_gap:
+            wait = cls._min_request_gap - elapsed
+            print(f"[engine] rate limiting: waiting {wait:.1f}s", file=sys.stderr, flush=True)
+            time.sleep(wait)
+        cls._last_request_time = time.time()
 
     def _cached_video_info(self, video_id: str):
         now = time.time()
@@ -304,11 +312,14 @@ class EngineHandler(BaseHTTPRequestHandler):
                 except Exception as e:
                     result["status"] = f"error: {e}"
             elif action == "playlist_videos":
+                self._rate_limit()
                 result.update(action_playlist_videos(self.scraper, request.get("playlist_id", "")))
             elif action == "video_info":
                 vid = request.get("video_id", "")
+                self._rate_limit()
                 result.update(self._cached_video_info(vid))
             elif action == "user_uploaded":
+                self._rate_limit()
                 result.update(action_user_uploaded(self.scraper, request.get("user_id", ""), request.get("page", 1)))
             elif action == "cover":
                 video_id = request.get("video_id", "")
@@ -347,7 +358,7 @@ class EngineHandler(BaseHTTPRequestHandler):
 
 def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5001
-    server = ThreadingHTTPServer(("0.0.0.0", port), EngineHandler)
+    server = HTTPServer(("0.0.0.0", port), EngineHandler)
     print(f"[engine] HTTP engine ready on port {port} (cloudscraper {cloudscraper.__version__})", flush=True)
     try:
         server.serve_forever()
