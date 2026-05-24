@@ -1133,12 +1133,9 @@ function checkStorage(cfgIn?: any): string {
     const out = new TextDecoder().decode(r.stdout || r.stderr || new Uint8Array()).trim();
     // HTTP codes: 2xx = ok for webdav/ftp
     if (c.protocol === "webdav" || c.protocol === "ftp") {
-      const match = out.match(/HTTP_CODE:(\d+)/);
-      const code = match ? parseInt(match[1]) : 0;
+      const code = parseInt(out);
       if (code >= 200 && code < 400) return "ok";
-      // Show just the error lines (not full verbose output)
-      const lines = out.split("\n").filter(l => l.includes("error") || l.includes("Error") || l.includes("HTTP") || l.includes("curl")).join("\n");
-      return (lines || out).slice(0, 1000) || `HTTP ${code} on ${remote}`;
+      return `HTTP ${out} on ${remote}`;
     }
     // SMB: exitCode === 0 means ok
     return r.exitCode === 0 ? "ok" : (out.slice(0, 200) || "smb connect failed");
