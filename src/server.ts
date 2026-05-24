@@ -1138,7 +1138,7 @@ function checkStorage(cfgIn?: any): string {
       if (code >= 200 && code < 400) return "ok";
       // Show just the error lines (not full verbose output)
       const lines = out.split("\n").filter(l => l.includes("error") || l.includes("Error") || l.includes("HTTP") || l.includes("curl")).join("\n");
-      return (lines || out).slice(0, 300) || `HTTP ${code} on ${remote}`;
+      return (lines || out).slice(0, 1000) || `HTTP ${code} on ${remote}`;
     }
     // SMB: exitCode === 0 means ok
     return r.exitCode === 0 ? "ok" : (out.slice(0, 200) || "smb connect failed");
