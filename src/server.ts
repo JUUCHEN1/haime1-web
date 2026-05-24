@@ -467,13 +467,13 @@ function settingsPage(lang: Lang, saved?: boolean, pwdMsg?: string): string {
       <div style="margin-bottom:16px">
         <label style="display:block;font-size:.72rem;color:var(--fg3);margin-bottom:6px;font-family:var(--mono);letter-spacing:.04em">${lang==='zh'?'自动检查间隔':'Auto-check interval'}</label>
         <select name="interval" class="inp" style="width:100%">
-          <option value="3600"   \${rssCfg.interval_seconds===3600?'selected':''}>${lang==='zh'?'1 小时':'1 hour'}</option>
-          <option value="7200"   \${rssCfg.interval_seconds===7200?'selected':''}>${lang==='zh'?'2 小时':'2 hours'}</option>
-          <option value="10800"  \${rssCfg.interval_seconds===10800?'selected':''}>${lang==='zh'?'3 小时':'3 hours'}</option>
-          <option value="21600"  \${rssCfg.interval_seconds===21600?'selected':''}>${lang==='zh'?'6 小时':'6 hours'}</option>
-          <option value="43200"  \${rssCfg.interval_seconds===43200?'selected':''}>${lang==='zh'?'12 小时':'12 hours'}</option>
-          <option value="86400"  \${rssCfg.interval_seconds===86400?'selected':''}>${lang==='zh'?'24 小时':'24 hours'}</option>
-          <option value="0"      \${rssCfg.interval_seconds===0?'selected':''}>${lang==='zh'?'关闭自动刷新':'Disable auto-refresh'}</option>
+          <option value="3600"   ${rssCfg.interval_seconds===3600?'selected':''}>${lang==='zh'?'1 小时':'1 hour'}</option>
+          <option value="7200"   ${rssCfg.interval_seconds===7200?'selected':''}>${lang==='zh'?'2 小时':'2 hours'}</option>
+          <option value="10800"  ${rssCfg.interval_seconds===10800?'selected':''}>${lang==='zh'?'3 小时':'3 hours'}</option>
+          <option value="21600"  ${rssCfg.interval_seconds===21600?'selected':''}>${lang==='zh'?'6 小时':'6 hours'}</option>
+          <option value="43200"  ${rssCfg.interval_seconds===43200?'selected':''}>${lang==='zh'?'12 小时':'12 hours'}</option>
+          <option value="86400"  ${rssCfg.interval_seconds===86400?'selected':''}>${lang==='zh'?'24 小时':'24 hours'}</option>
+          <option value="0"      ${rssCfg.interval_seconds===0?'selected':''}>${lang==='zh'?'关闭自动刷新':'Disable auto-refresh'}</option>
         </select>
       </div>
       <div style="font-size:.7rem;color:var(--fg4);margin-bottom:16px;line-height:1.5">${lang==='zh'?'首页仪表盘将按此间隔自动检查。设为 0 可关闭自动刷新。':'Dashboard auto-checks at this interval. Set 0 to disable.'}</div>

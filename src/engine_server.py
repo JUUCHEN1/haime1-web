@@ -216,6 +216,20 @@ class EngineHandler(BaseHTTPRequestHandler):
     scraper = None
     _last_proxy = None
 
+    # In-memory cache for video_info (avoids repeated cloudscraper calls for thumbnails)
+    _video_cache = {}
+    _cache_time = {}
+    CACHE_TTL = 300  # 5 minutes
+
+    def _cached_video_info(self, video_id: str):
+        now = time.time()
+        if video_id in self._video_cache and (now - self._cache_time.get(video_id, 0)) < self.CACHE_TTL:
+            return self._video_cache[video_id]
+        info = action_video_info(self.scraper, video_id)
+        self._video_cache[video_id] = info
+        self._cache_time[video_id] = now
+        return info
+
     def _ensure_scraper(self):
         current_proxy = _get_proxy()
         if self.scraper is None or current_proxy != self._last_proxy:
@@ -279,12 +293,13 @@ class EngineHandler(BaseHTTPRequestHandler):
             elif action == "playlist_videos":
                 result.update(action_playlist_videos(self.scraper, request.get("playlist_id", "")))
             elif action == "video_info":
-                result.update(action_video_info(self.scraper, request.get("video_id", "")))
+                vid = request.get("video_id", "")
+                result.update(self._cached_video_info(vid))
             elif action == "user_uploaded":
                 result.update(action_user_uploaded(self.scraper, request.get("user_id", ""), request.get("page", 1)))
             elif action == "cover":
                 video_id = request.get("video_id", "")
-                info = action_video_info(self.scraper, video_id)
+                info = self._cached_video_info(video_id)
                 if info.get("cover_url"):
                     r = self.scraper.get(info["cover_url"], headers={"Referer": f"{BASE_URL}/"})
                     if r.status_code == 200:
