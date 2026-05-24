@@ -30,7 +30,7 @@ COPY --from=bun-base /usr/local/bin/bun /usr/local/bin/bun
 
 # 2. 安装系统依赖 + Python 依赖 (cloudscraper + TLS支持)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 smbclient \
+    ca-certificates libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 smbclient curl \
     libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
     libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 \
     && rm -rf /var/lib/apt/lists/*
