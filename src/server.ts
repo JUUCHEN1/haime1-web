@@ -382,14 +382,17 @@ function vdPage(info: VideoInfoResult, lang: Lang): string {
       <h1 class="dt">${esc(info.title)}</h1>
       <div class="dm">#${info.video_id}</div>
       <div class="dq">${q.map(qq => `<span class="qt">${qq}</span>`).join("")}</div>
-      <div id="vtags-${info.video_id}" class="mt8" style="font-size:.7rem;color:var(--fg4);line-height:1.6;max-width:50ch"
-        hx-get="/api/video/tags/${info.video_id}" hx-trigger="load" hx-swap="innerHTML">
-        <span style="opacity:.5">${l==='zh'?'加载标签...':'Loading tags...'}</span>
-      </div>
+      <div id="vtags-${info.video_id}" style="display:none;font-size:.65rem;color:var(--fg4);line-height:1.6;padding-top:10px;margin-top:8px;border-top:1px solid var(--bd)"></div>
       <div class="da mt12">
         <select class="inp" id="dc-q" style="width:90px">${q.map((qq,i) => `<option value="${qq}" ${i===0?'selected':''}>${qq}</option>`).join("")}</select>
         <button class="btn btn-p btn-sm" data-dl="video:${info.video_id}">${I.dl} ${t("dl_btn",lang)}</button>
         <a href="/api/dlurl/${info.video_id}" class="btn btn-s btn-sm">${I.dl} Direct</a>
+        <button class="btn btn-g btn-sm" style="font-size:.7rem" onclick="
+          var d=document.getElementById('vtags-${info.video_id}');var b=this;
+          if(d.style.display==='none'){d.style.display='block';b.textContent='${lang==='zh'?'收起':'Collapse'} ▲';b.style.color='var(--accent)';b.style.borderColor='var(--accent-dim)';
+            if(!d.dataset.loaded){d.dataset.loaded='1';fetch('/api/video/tags/${info.video_id}').then(r=>r.text()).then(h=>{d.innerHTML=h;});}}
+          else{d.style.display='none';b.textContent='${lang==='zh'?'详细':'Details'} ▼';b.style.color='var(--fg4)';b.style.borderColor='var(--bd2)';}
+        ">${lang==='zh'?'详细':'Details'} ▼</button>
       </div>
     </div>
   </div></div></div>`;
@@ -810,9 +813,9 @@ app.get("/api/dc/preview/video/:id", async ({ params: { id }, headers }) => {
     const tr = await fetch(ENGINE, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "video_tags", video_id: id }) });
     if (tr.ok) {
       const td = await tr.json() as any;
-      const tagSpans = (td.tags || []).map((t: string) => `<span class="qt" style="font-size:.62rem;padding:2px 8px;border:1px solid var(--bd);background:var(--bg2)">${esc(t)}</span>`).join(" ");
-      const desc = td.description ? `<div style="margin-top:6px;opacity:.75;line-height:1.6;max-width:55ch">${esc(td.description)}</div>` : "";
-      if (tagSpans || desc) tagsHtml = `<div class="mt8" style="font-size:.7rem;color:var(--fg4)">${tagSpans}${desc}</div>`;
+      const tagSpans = (td.tags || []).map((t: string) => `<span class="qt" style="font-size:.62rem;padding:2px 8px;border:1px solid var(--bd);background:var(--bg2)">${esc(stripHtml(t))}</span>`).join("");
+      const desc = td.description ? `<div style="margin-top:8px;opacity:.78;line-height:1.65;max-width:55ch;font-size:.68rem">${esc(td.description)}</div>` : "";
+      if (tagSpans || desc) tagsHtml = `<div style="display:none;padding-top:10px;margin-top:8px;border-top:1px solid var(--bd)" id="dtags-${info.video_id}">${tagSpans ? `<div style="display:flex;flex-wrap:wrap;gap:4px">${tagSpans}</div>` : ""}${desc}</div>`;
     }
   } catch {}
   return new Response(`<div class="bento-p" style="animation:scaleIn .3s var(--ease) both;overflow:visible">
@@ -823,11 +826,15 @@ app.get("/api/dc/preview/video/:id", async ({ params: { id }, headers }) => {
       <h1 class="dt">${esc(info.title)}</h1>
       <div class="dm">#${info.video_id}</div>
       <div class="dq">${q.map(qq => `<span class="qt">${qq}</span>`).join("")}</div>
-      ${tagsHtml}
       <div class="da mt12">
         <select class="inp" id="dc-q" style="width:90px">${q.map((qq,i) => `<option value="${qq}" ${i===0?'selected':''}>${qq}</option>`).join("")}</select>
         <button class="btn btn-p btn-sm" data-dl="video:${info.video_id}">${I.dl} ${t("dl_btn", l)}</button>
-        <a href="/video/${info.video_id}" class="btn btn-g btn-sm">${I.info} Detail</a>
+        ${tagsHtml ? `<button class="btn btn-g btn-sm" onclick="
+          var d=document.getElementById('dtags-${info.video_id}');var b=this;
+          if(d.style.display==='none'){d.style.display='block';b.textContent='${l==='zh'?'收起':'Collapse'} ▲';b.style.color='var(--accent)';b.style.borderColor='var(--accent-dim)';}
+          else{d.style.display='none';b.textContent='${l==='zh'?'详细':'Details'} ▼';b.style.color='var(--fg4)';b.style.borderColor='var(--bd2)';}
+        ">${l==='zh'?'详细':'Details'} ▼</button>` : ""}
+        ${tagsHtml}
       </div>
     </div>
   </div></div></div>`, { headers: { "Content-Type": "text/html" } });
