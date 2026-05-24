@@ -1120,9 +1120,7 @@ function checkStorage(cfgIn?: any): string {
     const remote = url + (c.path || "");
     const creds = c.username ? `-u "${c.username}:${c.password}"` : "";
     if (c.protocol === "webdav") {
-      // Use rclone for reliable WebDAV connectivity test
-      const webdavUrl = remote.replace(/\/$/, "");
-      cmd = `rclone lsd :webdav: --webdav-url="${webdavUrl}" --webdav-user="${c.username || 'none'}" --webdav-pass="${c.password || ''}" 2>&1 | head -5; echo "EXIT:$?"`;
+      cmd = `curl -sv --connect-timeout 8 -o /dev/null -w "\\nPROPFIND_CODE:%{http_code}\\n" -H "Depth: 0" ${creds} -d '<?xml version="1.0"?><propfind xmlns="DAV:"><prop/></propfind>' -X PROPFIND "${remote}" 2>&1`;
     } else if (c.protocol === "smb") {
       const smbAuth = c.username ? `-U "${c.username}%${c.password}"` : "-N";
       const smbPath = `//${c.host}/${c.path}`;
@@ -1133,18 +1131,12 @@ function checkStorage(cfgIn?: any): string {
     if (!cmd) return "unknown protocol";
     const r = Bun.spawnSync(["sh", "-c", cmd], { timeout: 10000 });
     const out = new TextDecoder().decode(r.stdout || r.stderr || new Uint8Array()).trim();
-    // Check for rclone EXIT code first (WebDAV)
-    if (c.protocol === "webdav") {
-      const exitMatch = out.match(/EXIT:(\d+)/);
-      if (exitMatch && exitMatch[1] === "0") return "ok";
-      // Extract meaningful error from rclone output
-      const errLine = out.split("\n").filter(l => l.includes("Failed") || l.includes("Error") || l.includes("error") || l.includes("404") || l.includes("401") || l.includes("403") || l.includes("Couldn't")).join("\n");
-      return (errLine || out).slice(0, 600) || "rclone failed";
-    }
+    // HTTP codes: 2xx = ok for webdav/ftp
     if (c.protocol === "webdav" || c.protocol === "ftp") {
       const match = out.match(/HTTP_CODE:(\d+)/);
       const code = match ? parseInt(match[1]) : 0;
       if (code >= 200 && code < 400) return "ok";
+      // Show just the error lines (not full verbose output)
       const lines = out.split("\n").filter(l => l.includes("error") || l.includes("Error") || l.includes("HTTP") || l.includes("curl")).join("\n");
       return (lines || out).slice(0, 1000) || `HTTP ${code} on ${remote}`;
     }

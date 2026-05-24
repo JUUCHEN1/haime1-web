@@ -34,10 +34,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
     libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 \
     && rm -rf /var/lib/apt/lists/*
-
-# Install rclone for WebDAV/SMB/FTP storage
-RUN curl -fsSL https://rclone.org/install.sh | bash
-
 RUN pip install --no-cache-dir cloudscraper==1.2.60 requests webdavclient3
 
 # 3. 安装 supervisord
