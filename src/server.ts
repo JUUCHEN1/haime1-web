@@ -567,7 +567,8 @@ function settingsPage(lang: Lang, saved?: boolean, pwdMsg?: string, storageMsg?:
       <button type="submit" class="btn btn-p">${lang==='zh'?'保存配置':'Save Config'}</button>
       <button type="button" class="btn btn-g btn-sm" style="margin-left:8px" id="st-test-btn" onclick="
         var b=document.getElementById('st-test-btn');b.disabled=true;b.textContent='...';
-        fetch('/api/storage/test').then(r=>r.json()).then(d=>{
+        var f=b.closest('form');var d=new FormData(f);
+        fetch('/api/storage/test',{method:'POST',body:d}).then(r=>r.json()).then(function(d){
           var m=document.getElementById('st-test-msg');
           if(!m){m=document.createElement('div');m.id='st-test-msg';var p=b.parentNode;p.insertBefore(m,b.nextSibling);}
           m.style.cssText='margin-top:10px;padding:8px 14px;border-radius:6px;font-size:.72rem;font-family:var(--mono)';
@@ -704,9 +705,20 @@ app.post("/api/storage", async ({ body, headers }) => {
 });
 
 // Storage connection test
-app.get("/api/storage/test", ({ headers }) => {
+app.post("/api/storage/test", async ({ body, headers }) => {
   if (!isAuthed(headers)) return Response.redirect("/login", 302);
-  const status = checkStorage();
+  const raw = body as any;
+  // Test with form data (what the user typed) — build temp config
+  const cfg = {
+    protocol: String(raw?.protocol || "local"),
+    host: String(raw?.host || ""),
+    username: String(raw?.username || ""),
+    password: String(raw?.password || ""),
+    path: String(raw?.path || ""),
+    enabled: true,
+    direct: false,
+  };
+  const status = checkStorage(cfg);
   if (status === "ok") return { ok: true };
   return { ok: false, error: status };
 });
@@ -1092,8 +1104,8 @@ function saveStorage(cfg: StorageConfig): void {
   safeWriteJSON(STORAGE_CONFIG_PATH, cfg);
   checkStorage();
 }
-function checkStorage(): string {
-  const c = loadStorage();
+function checkStorage(cfgIn?: any): string {
+  const c = cfgIn || loadStorage();
   if (!c.enabled || c.protocol === "local") return "ok";
   try {
     let cmd = "";
