@@ -62,6 +62,7 @@ def clean_name(name: str) -> str:
 
 def extract_video_ids(html: str) -> list[str]:
     ids = set()
+    # Pattern 1: data-href with watch?v=ID
     marker = 'data-href="'
     pos = 0
     while True:
@@ -76,8 +77,15 @@ def extract_video_ids(html: str) -> list[str]:
         if m:
             ids.add(m.group(1))
         pos = end + 1
+    # Pattern 2: href with watch?v=ID
     if not ids:
         ids.update(re.findall(r'href="[^"]*watch\?v=(\d+)"', html))
+    # Pattern 3: Any occurrence of /watch?v=ID in href or onclick
+    if not ids:
+        ids.update(re.findall(r'watch\?v=(\d+)', html))
+    # Pattern 4: data-id or data-video attributes
+    if not ids:
+        ids.update(re.findall(r'data-(?:id|video)[= ]*["\']?(\d+)', html))
     return sorted(ids)
 
 
@@ -101,12 +109,21 @@ def action_playlist_videos(scraper, playlist_id: str):
     url = f"{BASE_URL}/playlist?list={playlist_id}"
     for i in range(MAX_RETRIES):
         r = scraper.get(url, timeout=30)
+        print(f"[engine] playlist_videos {playlist_id} attempt {i+1}: HTTP {r.status_code} len={len(r.text)}", file=sys.stderr, flush=True)
         if r.status_code == 200:
             ids = extract_video_ids(r.text)
+            print(f"[engine] playlist_videos {playlist_id}: extracted {len(ids)} video IDs", file=sys.stderr, flush=True)
             if not ids and len(r.text) < 30000 and i < MAX_RETRIES - 1:
                 time.sleep(RETRY_DELAY)
                 continue
+            if not ids:
+                # Debug: check what patterns exist in the HTML
+                sample = r.text[-2000:] if len(r.text) > 2000 else r.text
+                hrefs = re.findall(r'href="([^"]+)"', sample)[:10]
+                print(f"[engine] playlist_videos {playlist_id}: no IDs found, sample hrefs: {hrefs}", file=sys.stderr, flush=True)
             return {"playlist_id": playlist_id, "videos": ids, "count": len(ids)}
+        elif r.status_code != 200 and i < MAX_RETRIES - 1:
+            time.sleep(RETRY_DELAY)
     return {"playlist_id": playlist_id, "videos": [], "count": 0, "error": "failed after retries"}
 
 
