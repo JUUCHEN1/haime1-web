@@ -152,6 +152,7 @@ const T: Record<string, string> = {
 };
 function t(k: string, lang: Lang): string { const x = T[k]; return x ? x.split("|")[lang === "zh" ? 0 : 1] : k; }
 function esc(s: string): string { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;"); }
+function stripHtml(s: string): string { return s.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim(); }
 function ts(k: string, lang: Lang): string { return esc(t(k, lang)); }
 
 // ─── SVG Icons ──────────────────────────────────────────────
@@ -324,10 +325,19 @@ function vlPage(videos: string[], title: string, backUrl: string, lang: Lang, dl
     ${pageInfo ? `<span style="font-size:.7rem;color:var(--fg3);font-family:var(--mono)">${esc(pageInfo)}</span>` : ""}
   </div>
   ${pgHtml || ""}${dlBtns || ""}
-  <div class="bento-p"><div class="bento-b stagger">${videos.map(v => `<div class="li" style="cursor:default">
+  <div class="bento-p"><div class="bento-b stagger">${videos.map(v => `<div class="li" style="cursor:default;flex-wrap:wrap">
     <div class="li-th"><img src="/api/cover/${v}" loading="lazy" style="width:100%;height:100%;object-fit:cover" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span style="display:none;font-size:.6rem;color:var(--fg4);font-family:var(--mono);align-items:center;justify-content:center;width:100%;height:100%">#${v}</span></div>
-    <div class="li-bd"><div class="li-t" id="ti-${v}" hx-get="/api/video/title/${v}" hx-trigger="load" hx-swap="innerHTML">#${v}</div><div class="li-m" style="font-family:var(--mono)">#${v}</div></div>
-    <div class="li-act btn-grp">
+    <div class="li-bd" style="flex:1">
+      <div class="li-t" id="ti-${v}" hx-get="/api/video/title/${v}" hx-trigger="load" hx-swap="innerHTML">#${v}</div>
+      <div class="li-m" style="font-family:var(--mono)">#${v}</div>
+      <div id="vtags-${v}" style="display:none;font-size:.62rem;color:var(--fg4);line-height:1.6;padding-top:6px;margin-top:4px;border-top:1px solid var(--bd)"></div>
+      <button class="tag-toggle mt4" style="font-size:.56rem;padding:2px 7px;border:1px solid var(--bd2);border-radius:var(--r-sm);background:var(--bg2);color:var(--fg4);cursor:pointer;font-family:var(--mono);letter-spacing:.04em;transition:all var(--tr-fast)"
+        onclick="var d=document.getElementById('vtags-${v}');var b=this;
+        if(d.style.display==='none'){d.style.display='block';b.textContent='▲ ${lang==='zh'?'收起':'Collapse'}';b.style.color='var(--accent)';b.style.borderColor='var(--accent-dim)';
+          if(!d.dataset.loaded){d.dataset.loaded='1';fetch('/api/video/tags/${v}').then(r=>r.text()).then(h=>{d.innerHTML=h;});}}
+        else{d.style.display='none';b.textContent='▼ ${lang==='zh'?'标签':'Tags'}';b.style.color='var(--fg4)';b.style.borderColor='var(--bd2)';}">▼ ${lang==='zh'?'标签':'Tags'}</button>
+    </div>
+    <div class="li-act btn-grp" style="align-self:flex-start">
       <select class="inp" style="width:68px;padding:3px 4px;font-size:.64rem;font-family:var(--mono)" onchange="this.nextElementSibling.setAttribute('data-dl','video:${v}:'+this.value)"><option value="">1080p</option><option selected>1080p</option><option>720p</option><option>480p</option><option>360p</option></select>
       <button class="btn btn-s btn-xs" data-dl="video:${v}:720p" onclick="event.stopPropagation();var d=this.getAttribute('data-dl').split(':');fetch('/api/dl/'+d[0]+'/'+d[1]+'?quality='+d[2],{method:'POST'}).then(r=>r.json()).then(t=>{var s=document.getElementById('dl-s');if(s)s.textContent=_l==='zh'?'已加入: '+t.label:'Queued: '+t.label;setTimeout(()=>location.reload(),800)}).catch(()=>{})">${I.dl}</button>
     </div>

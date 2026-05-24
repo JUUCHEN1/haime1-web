@@ -272,11 +272,13 @@ class EngineHandler(BaseHTTPRequestHandler):
                 try:
                     r = self.scraper.get(f"{BASE_URL}/watch?v={vid}", timeout=15)
                     if r.status_code == 200:
-                        tags = re.findall(r'<a[^>]*href="[^"]*tag[^"]*"[^>]*>(.*?)</a>', r.text, re.DOTALL)
-                        if not tags:
-                            tags = re.findall(r'<a[^>]*class="[^"]*badge[^"]*"[^>]*>(.*?)</a>', r.text, re.DOTALL)
+                        raw_tags = re.findall(r'<a[^>]*href="[^"]*tag[^"]*"[^>]*>(.*?)</a>', r.text, re.DOTALL)
+                        if not raw_tags:
+                            raw_tags = re.findall(r'<a[^>]*class="[^"]*badge[^"]*"[^>]*>(.*?)</a>', r.text, re.DOTALL)
+                        # Strip HTML from tag text (e.g. <span>(6)</span> -> (6), &nbsp; -> space)
+                        tags = [re.sub(r'<[^>]+>', '', t).replace('&nbsp;', ' ').strip() for t in raw_tags if t.strip()][:10]
                         desc_match = re.search(r'<meta[^>]*name="description"[^>]*content="([^"]*)"', r.text)
-                        result["tags"] = [t.strip() for t in tags if t.strip()][:10]
+                        result["tags"] = tags
                         result["description"] = desc_match.group(1).strip()[:500] if desc_match else ""
                     else:
                         result["tags"] = []
