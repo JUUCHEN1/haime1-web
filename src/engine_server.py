@@ -24,6 +24,22 @@ RETRY_DELAY = 3
 BASE_URL = "https://hanime1.me"
 
 
+def _get_proxy():
+    """Read proxy from config file (set by web UI settings page)."""
+    config_path = os.environ.get("PROXY_CONFIG_PATH", "/app/data/proxy-config.json")
+    try:
+        with open(config_path) as f:
+            cfg = json.load(f)
+        return cfg.get("socks5") or cfg.get("http") or ""
+    except:
+        pass
+    # Fallback to env vars (Docker)
+    for key in ("ENGINE_PROXY_SOCKS5", "ENGINE_PROXY_HTTP", "ENGINE_PROXY"):
+        val = os.environ.get(key, "").strip()
+        if val:
+            return val
+    return ""
+
 def create_scraper():
     s = cloudscraper.create_scraper()
     s.headers.update({
@@ -31,6 +47,12 @@ def create_scraper():
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.5",
     })
+    proxy = _get_proxy()
+    if proxy:
+        s.proxies = {"http": proxy, "https": proxy}
+        print(f"[engine] using proxy: {proxy}", file=sys.stderr, flush=True)
+    else:
+        print(f"[engine] direct connection (no proxy)", file=sys.stderr, flush=True)
     return s
 
 
@@ -174,9 +196,17 @@ def action_download_url(scraper, video_id: str, quality: str = "1080p"):
 
 
 class EngineHandler(BaseHTTPRequestHandler):
-    scraper = create_scraper()
+    scraper = None
+    _last_proxy = None
+
+    def _ensure_scraper(self):
+        current_proxy = _get_proxy()
+        if self.scraper is None or current_proxy != self._last_proxy:
+            self.scraper = create_scraper()
+            self._last_proxy = current_proxy
 
     def do_POST(self):
+        self._ensure_scraper()
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length) if length else b"{}"
         try:
