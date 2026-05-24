@@ -120,5 +120,33 @@ function runNext() {
       t.progress = t.error;
     }
     runNext();
+    // Auto-transfer to remote storage
+    transferToStorage(out, t.label);
   });
+}
+
+async function transferToStorage(localPath: string, label: string) {
+  try {
+    // Dynamically import to avoid circular deps
+    const cfgPath = join(process.cwd(), "data", "storage-config.json");
+    const cfgFile = Bun.file(cfgPath);
+    if (!await cfgFile.exists()) return;
+    const cfg = await cfgFile.json() as any;
+    if (!cfg.enabled || cfg.protocol === "local") return;
+
+    const remotePath = `${cfg.path}/${label.replace(/[\\/:*?"<>|]/g, "_")}`;
+    const creds = cfg.username ? `-u ${cfg.username}:${cfg.password}` : "";
+    let cmd = "";
+    if (cfg.protocol === "webdav") {
+      cmd = `mkdir -p "$(dirname '${remotePath}')" && cp -r "${localPath}" "${remotePath}" 2>&1 || curl -sf ${creds} -T "{}" "${cfg.host}${remotePath}/{}" 2>&1`;
+    } else if (cfg.protocol === "smb") {
+      const smbAuth = cfg.username ? `-U ${cfg.username}%${cfg.password}` : "-N";
+      cmd = `smbclient ${smbAuth} "//${cfg.host}/${cfg.path}" -c 'prompt; recurse; mput ${localPath}/*' 2>&1`;
+    } else if (cfg.protocol === "ftp") {
+      cmd = `find "${localPath}" -type f -exec curl -sf ${creds} -T "{}" "ftp://${cfg.host}${remotePath}/$(basename '{}')" \; 2>&1`;
+    }
+    if (!cmd) return;
+    const p = spawn("sh", ["-c", cmd], { stdio: ["ignore", "pipe", "pipe"] });
+    p.on("error", () => {});
+  } catch {}
 }

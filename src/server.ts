@@ -23,6 +23,7 @@ const PASSWORD_FILE = join(DATA_DIR, "admin-password.json");
 const PROXY_CONFIG_PATH = join(DATA_DIR, "proxy-config.json");
 const RSS_SUBS_PATH = join(DATA_DIR, "rss-subs.json");
 const RSS_CONFIG_PATH = join(DATA_DIR, "rss-config.json");
+const STORAGE_CONFIG_PATH = join(DATA_DIR, "storage-config.json");
 const DEFAULT_RSS_INTERVAL = 10800; // 3 hours
 const SESSION_SECRET = process.env.SESSION_SECRET || randomBytes(32).toString("hex");
 
@@ -455,9 +456,10 @@ function loginPage(lang: Lang, error?: string): string {
 }
 
 // ─── Settings page ──────────────────────────────────────────
-function settingsPage(lang: Lang, saved?: boolean, pwdMsg?: string): string {
+function settingsPage(lang: Lang, saved?: boolean, pwdMsg?: string, storageMsg?: string): string {
   const cfg = loadProxy();
   const rssCfg = loadRssConfig();
+  const stCfg = loadStorage();
   return `<div style="animation:scaleIn .35s var(--ease) both">
 <div class="bento-p mb20">
   <div class="bento-h"><div class="bento-hl">${I.zz} ${lang==='zh'?'代理设置':'Proxy Settings'}</div></div>
@@ -516,6 +518,43 @@ function settingsPage(lang: Lang, saved?: boolean, pwdMsg?: string): string {
         <input name="confirm" type="password" class="inp" placeholder="${lang==='zh'?'再次输入':'re-type'}">
       </div>
       <button type="submit" class="btn btn-p">${lang==='zh'?'更新密码':'Update Password'}</button>
+    </form>
+  </div>
+</div></div>
+<div class="bento-p mb20">
+  <div class="bento-h"><div class="bento-hl">${I.dl2} ${lang==='zh'?'存储设置':'Storage Settings'}</div></div>
+  <div class="bento-b" style="padding:20px">
+    ${typeof storageMsg !== 'undefined' && storageMsg ? `<div style="background:${(storageMsg as string).startsWith('!')?'var(--red-dim)':'var(--green-dim)'};color:${(storageMsg as string).startsWith('!')?'var(--red)':'var(--green)'};padding:10px 16px;border-radius:var(--r-sm);font-size:.75rem;margin-bottom:16px;border:1px solid ${(storageMsg as string).startsWith('!')?'var(--red)':'var(--green)'};font-family:var(--mono)">${storageMsg.replace(/^!/,'')}</div>` : ''}
+    <form method="POST" action="/api/storage">
+      <div style="margin-bottom:16px">
+        <label style="display:block;font-size:.72rem;color:var(--fg3);margin-bottom:6px;font-family:var(--mono);letter-spacing:.04em">${lang==='zh'?'协议':'Protocol'}</label>
+        <select name="protocol" class="inp" style="width:100%">
+          <option value="local" ${stCfg.protocol==='local'?'selected':''}>${lang==='zh'?'本地 / 默认':'Local / Default'}</option>
+          <option value="webdav" ${stCfg.protocol==='webdav'?'selected':''}>WebDAV</option>
+          <option value="smb" ${stCfg.protocol==='smb'?'selected':''}>SMB / CIFS</option>
+          <option value="ftp" ${stCfg.protocol==='ftp'?'selected':''}>FTP</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:10px;margin-bottom:16px">
+        <div style="flex:1"><label style="display:block;font-size:.72rem;color:var(--fg3);margin-bottom:6px;font-family:var(--mono);letter-spacing:.04em">${lang==='zh'?'主机':'Host'}</label><input name="host" class="inp" placeholder="192.168.1.100" value="${esc(stCfg.host)}"></div>
+        <div style="width:80px"><label style="display:block;font-size:.72rem;color:var(--fg3);margin-bottom:6px;font-family:var(--mono);letter-spacing:.04em">${lang==='zh'?'端口':'Port'}</label><input name="port" class="inp" placeholder="" value="${esc(stCfg.port)}"></div>
+      </div>
+      <div style="display:flex;gap:10px;margin-bottom:16px">
+        <div style="flex:1"><label style="display:block;font-size:.72rem;color:var(--fg3);margin-bottom:6px;font-family:var(--mono);letter-spacing:.04em">${lang==='zh'?'用户名':'Username'}</label><input name="username" class="inp" placeholder="" value="${esc(stCfg.username)}"></div>
+        <div style="flex:1"><label style="display:block;font-size:.72rem;color:var(--fg3);margin-bottom:6px;font-family:var(--mono);letter-spacing:.04em">${lang==='zh'?'密码':'Password'}</label><input name="password" type="password" class="inp" placeholder="" value="${esc(stCfg.password)}"></div>
+      </div>
+      <div style="margin-bottom:16px">
+        <label style="display:block;font-size:.72rem;color:var(--fg3);margin-bottom:6px;font-family:var(--mono);letter-spacing:.04em">${lang==='zh'?'远程路径':'Remote Path'}</label>
+        <input name="path" class="inp" placeholder="/downloads/anime" value="${esc(stCfg.path)}">
+      </div>
+      <div style="margin-bottom:16px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.75rem;color:var(--fg3)">
+          <input type="checkbox" name="enabled" value="1" ${stCfg.enabled?'checked':''} style="width:16px;height:16px;accent-color:var(--accent)">
+          ${lang==='zh'?'启用远程存储（下载完成后自动同步）':'Enable remote storage (auto-sync after download)'}
+        </label>
+      </div>
+      <div style="font-size:.7rem;color:var(--fg4);margin-bottom:16px;line-height:1.5">${lang==='zh'?'支持 WebDAV、SMB/CIFS、FTP。选择"本地"使用默认下载目录。下载完成后自动将文件传输到远程存储。':'Supports WebDAV, SMB/CIFS, FTP. Select "Local" to use default downloads directory. Files auto-transfer after download.'}</div>
+      <button type="submit" class="btn btn-p">${lang==='zh'?'保存配置':'Save Config'}</button>
     </form>
   </div>
 </div></div>`;
@@ -622,6 +661,26 @@ app.post("/api/password", async ({ body, headers }) => {
 });
 
 // Save RSS interval
+app.post("/api/storage", async ({ body, headers }) => {
+  const l = gl(headers);
+  const raw = body as any;
+  const cfg: any = {
+    protocol: String(raw?.protocol || "local"),
+    host: String(raw?.host || ""),
+    port: String(raw?.port || ""),
+    username: String(raw?.username || ""),
+    password: String(raw?.password || ""),
+    path: String(raw?.path || "/downloads"),
+    enabled: raw?.enabled === "1" || raw?.enabled === true,
+  };
+  saveStorage(cfg);
+  const status = checkStorage();
+  const msg = cfg.enabled
+    ? (status === "ok" ? `${l==='zh'?'存储已连接':'Storage connected'}` : `!${l==='zh'?'连接失败: ':'Connection failed: '}${status}`)
+    : `${l==='zh'?'已保存（未启用）':'Saved (not enabled)'}`;
+  return hx(settingsPage(l, false, undefined, msg), l, l==='zh'?'设置':'Settings', "s", headers);
+});
+
 app.post("/api/rss-interval", async ({ body, headers }) => {
   if (!isAuthed(headers)) return Response.redirect("/login", 302);
   const l = gl(headers);
@@ -989,3 +1048,34 @@ app.get("/api/dlstatus", ({ headers }) => {
 const port = process.env.PORT ? parseInt(process.env.PORT) : PORT;
 app.listen(port);
 console.log(`  ${APP} v4 at http://localhost:${port}`);
+// ─── Storage config ───────────────────────────────────
+type StorageProtocol = "local" | "webdav" | "smb" | "ftp";
+interface StorageConfig { protocol: StorageProtocol; host: string; port: string; username: string; password: string; path: string; enabled: boolean; }
+let _storageCfg: StorageConfig | null = null;
+function loadStorage(): StorageConfig {
+  if (_storageCfg) return _storageCfg;
+  try { _storageCfg = safeReadJSON(STORAGE_CONFIG_PATH) as StorageConfig; } catch {}
+  return _storageCfg || { protocol: "local", host: "", port: "", username: "", password: "", path: "/downloads", enabled: false };
+}
+function saveStorage(cfg: StorageConfig): void {
+  _storageCfg = cfg;
+  safeWriteJSON(STORAGE_CONFIG_PATH, cfg);
+  checkStorage();
+}
+function checkStorage(): string {
+  const c = loadStorage();
+  if (!c.enabled || c.protocol === "local") return "ok";
+  // Test connectivity with curl (WebDAV/FTP) or smbclient (SMB)
+  try {
+    const cmd = c.protocol === "smb"
+      ? `smbclient -c 'ls' //${c.host}/${c.path} ${c.password ? '-U '+c.username+'%'+c.password : '-N'} 2>&1`
+      : c.protocol === "webdav"
+      ? `curl -sf -u ${c.username}:${c.password} -X PROPFIND "${c.host}${c.path}" 2>&1`
+      : c.protocol === "ftp"
+      ? `curl -sf -u ${c.username}:${c.password} "ftp://${c.host}${c.path}" 2>&1`
+      : "echo ok";
+    const r = Bun.spawnSync(["sh", "-c", cmd], { timeout: 8000 });
+    return r.exitCode === 0 ? "ok" : (r.stderr ? new TextDecoder().decode(r.stderr).slice(0,200) : "connect failed");
+  } catch (e: any) { return e.message || "error"; }
+}
+
