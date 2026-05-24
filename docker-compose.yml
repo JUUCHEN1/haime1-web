@@ -8,6 +8,8 @@ services:
     environment:
       - PORT=3280
       - ENGINE_URL=http://127.0.0.1:5001
+      - HANIME_BIN=/app/hanime-dl-lite
+      - DL_DIR=/downloads
       - ADMIN_PASSWORD=admin
       - SESSION_SECRET=change-me-in-production
     volumes:

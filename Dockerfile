@@ -20,7 +20,7 @@ ENV BUN_RUNTIME=/usr/local/bin/bun
 FROM python:3.12-slim AS python-base
 
 # 安装 Python 依赖
-RUN pip install --no-cache-dir cloudscraper==1.2.60
+RUN pip install --no-cache-dir cloudscraper==1.2.60 requests
 
 # ─── Stage 3: 合并 ─────────────────────────────────────────
 FROM python:3.12-slim
@@ -34,7 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
     libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 \
     && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir cloudscraper==1.2.60
+RUN pip install --no-cache-dir cloudscraper==1.2.60 requests
 
 # 3. 安装 supervisord
 RUN pip install --no-cache-dir supervisor
@@ -47,7 +47,11 @@ RUN mkdir -p /app/data
 COPY src/ /app/src/
 COPY supervisord.conf /app/
 COPY diag.py /app/
+COPY hanime-dl-lite /app/
 COPY package.json /app/
+
+# 5b. 下载器可执行
+RUN chmod +x /app/hanime-dl-lite
 
 # 6. 安装 Node 依赖 (elysia)
 RUN bun install --production

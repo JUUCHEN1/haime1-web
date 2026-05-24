@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+"""
+hanime-dl-lite — 轻量版 hanime1.me 下载器
+使用 cloudscraper 绕过 Cloudflare，无需 Chrome
+"""
+import cloudscraper
+import json
+import os
+import re
+import sys
+import time
+import argparse
+import urllib.parse
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+MAX_RETRIES = 5
+RETRY_DELAY = 3
+
+def create_scraper():
+    s = cloudscraper.create_scraper()
+    s.headers.update({
+        "Referer": "https://hanime1.me/",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+    })
+    return s
+
+def get_video_ids_from_playlist(scraper, list_id):
+    """从播放列表页面提取所有视频ID"""
+    url = f"https://hanime1.me/playlist?list={list_id}"
+    for i in range(MAX_RETRIES):
+        r = scraper.get(url, timeout=30)
+        if r.status_code == 200:
+            ids = set()
+            for m in re.finditer(r'href="[^"]*watch\?v=(\d+)"', r.text):
+                ids.add(m.group(1))
+            result = sorted(ids)
+            print(f"  播放列表 {list_id}: 找到 {len(result)} 个视频")
+            return result
+        print(f"  重试 {i+1}/{MAX_RETRIES}...")
+        time.sleep(RETRY_DELAY)
+    return []
+
+def get_video_info(scraper, video_id):
+    """从下载页面获取视频信息"""
+    url = f"https://hanime1.me/download?v={video_id}"
+    for i in range(MAX_RETRIES):
+        r = scraper.get(url, timeout=30)
+        if r.status_code == 200:
+            # Title from h3
+            title_match = re.search(r'<h3[^>]*>(.*?)</h3>', r.text, re.DOTALL)
+            title = title_match.group(1).strip() if title_match else f"video_{video_id}"
+
+            # Cover image
+            img_match = re.search(r'<img[^>]*class="download-image"[^>]*src="([^"]+)"', r.text)
+            cover_url = img_match.group(1) if img_match else ""
+
+            # Download links from data-url + resolution from filename
+            links = re.findall(r'<a[^>]*data-url="([^"]+)"[^>]*>(.*?)</a>', r.text, re.DOTALL)
+            
+            videos = {}
+            for data_url, link_html in links:
+                # Get quality from filename (e.g. 114598-1080p.mp4 -> 1080p)
+                q_match = re.search(r'-(\d+p)\.', data_url)
+                quality = q_match.group(1) if q_match else "unknown"
+                videos[quality] = data_url
+
+            # Fallback: from <a href>
+            if not videos:
+                hrefs = re.findall(r'<a[^>]*href="(https://[^"]+\.(mp4|m3u8)[^"]*)"[^>]*>', r.text)
+                unique = list(set(h[0] for h in hrefs))
+                for j, du in enumerate(unique):
+                    q_match = re.search(r'-(\d+p)\.', du)
+                    quality = q_match.group(1) if q_match else f"link_{j}"
+                    videos[quality] = du
+
+            return {
+                "video_id": video_id,
+                "title": title,
+                "cover_url": cover_url,
+                "videos": videos,
+            }
+        elif r.status_code == 429:
+            wait = int(r.headers.get("Retry-After", RETRY_DELAY))
+            print(f"  被限速，等待 {wait}s...")
+            time.sleep(wait)
+        else:
+            if i < MAX_RETRIES - 1:
+                time.sleep(RETRY_DELAY)
+    return None
+
+def download_file(url, filepath, proxy=None):
+    """下载文件，支持断点续传"""
+    import requests
+    temp_path = str(filepath) + ".tmp"
+    headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"}
+
+    start_offset = 0
+    if os.path.exists(temp_path):
+        start_offset = os.path.getsize(temp_path)
+        headers["Range"] = f"bytes={start_offset}-"
+
+    mode = "ab" if start_offset > 0 else "wb"
+    try:
+        proxies = None
+        if proxy:
+            proxies = {"http": proxy, "https": proxy}
+        
+        r = requests.get(url, headers=headers, stream=True, timeout=60,
+                        proxies=proxies)
+        
+        if r.status_code == 416:  # Range not satisfiable
+            os.remove(temp_path)
+            return download_file(url, filepath, proxy)
+
+        if r.status_code not in (200, 206):
+            return False
+
+        total = int(r.headers.get("Content-Length", 0)) + start_offset
+        downloaded = start_offset
+
+        with open(temp_path, mode) as f:
+            for chunk in r.iter_content(chunk_size=1024*1024):
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+
+        os.rename(temp_path, str(filepath))
+        print(f"    OK ({total/1024/1024:.1f} MB)")
+        return True
+    except Exception as e:
+        print(f"    下载失败: {e}")
+        return False
+
+def main():
+    parser = argparse.ArgumentParser(description="hanime1.me 轻量下载器")
+    parser.add_argument("--list", "-l", help="播放列表ID")
+    parser.add_argument("--video", "-v", help="单个视频ID")
+    parser.add_argument("--output", "-o", default="./download", help="下载目录")
+    parser.add_argument("--resolution", "-q", default="1080p", help="画质 (1080p/720p/480p)")
+    parser.add_argument("--workers", "-w", type=int, default=3, help="并发下载数")
+    parser.add_argument("--proxy", help="下载用代理 (如 http://127.0.0.1:3128)")
+    parser.add_argument("--no-cover", action="store_true", help="跳过封面")
+    args = parser.parse_args()
+
+    if not args.video and not args.list:
+        print("请指定 --video 或 --list")
+        sys.exit(1)
+
+    out_dir = Path(args.output)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    scraper = create_scraper()
+    video_ids = []
+
+    if args.video:
+        video_ids.append(args.video)
+    if args.list:
+        ids = get_video_ids_from_playlist(scraper, args.list)
+        video_ids.extend(ids)
+
+    if not video_ids:
+        print("没有找到任何视频")
+        return
+
+    print(f"\n共有 {len(video_ids)} 个视频待处理\n")
+
+    import requests
+    infos = []
+    for vid in video_ids:
+        print(f"[{vid}] 解析中...")
+        info = get_video_info(scraper, vid)
+        if info:
+            infos.append(info)
+            title_short = info["title"][:40]
+            quals = sorted(info["videos"].keys(), key=lambda x: int(x.replace('p','')), reverse=True)
+            print(f"  标题: {title_short}")
+            print(f"  可用: {' | '.join(quals)}")
+        else:
+            print(f"  FAILED")
+        time.sleep(1.5)
+
+    if not infos:
+        print("解析全部失败")
+        return
+
+    print(f"\n开始下载 {len(infos)} 个视频...\n")
+
+    for info in infos:
+        # 选择画质
+        all_quals = sorted(info["videos"].keys(), key=lambda x: int(x.replace('p','')), reverse=True)
+        preferred = args.resolution
+        dl_url = info["videos"].get(preferred) or info["videos"].get(all_quals[0], list(info["videos"].values())[0])
+        actual_quality = [k for k, v in info["videos"].items() if v == dl_url][0]
+
+        base_name = clean_name(info['title'])
+
+        # 封面
+        if not args.no_cover and info["cover_url"]:
+            cover_path = out_dir / f"{base_name}.jpg"
+            if not cover_path.exists():
+                print(f"  [封面] {base_name}.jpg")
+                download_file(info["cover_url"], cover_path, None)
+
+        # 视频
+        video_path = out_dir / f"{base_name}_{actual_quality}.mp4"
+        if video_path.exists():
+            print(f"  [跳过] {base_name}_{actual_quality}.mp4 (已存在)")
+            continue
+
+        print(f"  [{actual_quality}] {base_name}.mp4")
+        download_file(dl_url, video_path, args.proxy)
+
+    print("\n全部完成!")
+
+def clean_name(name):
+    """清理文件名中的非法字符"""
+    name = re.sub(r'[\\/:*?"<>|]', '_', name)
+    return name.strip()[:200]
+
+if __name__ == "__main__":
+    main()

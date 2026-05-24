@@ -84,6 +84,14 @@ function runNext() {
   });
   dlProcs.set(t.id, p);
 
+  p.on("error", (err: any) => {
+    t.status = "error";
+    t.error = err.message || String(err);
+    t.progress = t.error;
+    dlProcs.delete(t.id);
+    runNext();
+  });
+
   let buf = "";
   p.stdout.on("data", (d: Buffer) => {
     buf += d.toString();
