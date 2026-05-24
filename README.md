@@ -1,6 +1,6 @@
 # hanime-web v5
 
-hanime1.me video browser & downloader. Dark tech aesthetic, SSR + HTMX, built-in login & proxy config.
+hanime1.me video browser & downloader. Dark tech aesthetic, SSR + HTMX, built-in login, proxy config, RSS subscriptions, and remote storage (WebDAV/SMB/FTP).
 
 ## Requirements
 
@@ -11,88 +11,132 @@ hanime1.me video browser & downloader. Dark tech aesthetic, SSR + HTMX, built-in
 ## Quick Start
 
 ```bash
-# 1. Clone
 git clone https://github.com/JUUCHEN1/haime1-web.git
 cd haime1-web
-
-# 2. Install deps
 bun install
 
-# 3. Set admin password (otherwise defaults to "admin")
 export ADMIN_PASSWORD="your-strong-password"
 
-# 4. Start engine
+# Start engine
 python3 src/engine_server.py &
 
-# 5. Start web server
+# Start web server
 bun --hot src/server.ts
 ```
 
-Open `http://localhost:3280/login` — enter your admin password, then configure proxy in Settings.
+Open `http://localhost:3280/login` — enter admin password, then configure proxy in Settings.
 
 ## Architecture
 
 ```
-Browser ──► :3280 (Bun + HTMX) ──► :5001 (Python engine) ──► proxy (HTTP/SOCKS5) ──► hanime1.me
-                                          │
-                                          ▼
-                                   proxy-config.json
+Browser ──► :3280 (Bun + HTMX) ──► :5001 (Python engine) ──► proxy ──► hanime1.me
+                                       │
+                                       ▼
+                                  /app/data/ (configs)
 ```
 
 | File | Role |
 |------|------|
-| `src/server.ts` | Web server, HTML templates, routes, auth, proxy config |
+| `src/server.ts` | Web server, HTML templates, routes, auth, all config |
 | `src/styles.css` | Design system (Geist, dark theme, CSS spring physics) |
 | `src/engine.ts` | TypeScript bridge to Python engine |
-| `src/engine_server.py` | Flask engine — video info, covers, proxy |
-| `src/download.ts` | Download queue manager (hanime-dl backed) |
-| `src/channels/` | hanime1 channel scraper |
-| `proxy-config.json` | Proxy settings (HTTP/SOCKS5), created on first save |
+| `src/engine_server.py` | Python engine — video info, covers, proxy, cache |
+| `src/download.ts` | Download queue manager (hanime-dl-lite backed) |
+| `hanime-dl-lite` | Python downloader binary (cloudscraper) |
+| `hanime-dl-lite-package/` | Parent repo for downloader |
+| `Dockerfile` | Multi-stage Docker image (Python + Bun + Supervisor) |
+| `docker-compose.yml` | Docker Compose service definition |
+| `supervisord.conf` | Supervisor process manager config |
 
 ## Features
 
-- **Login portal** — HMAC-signed cookie sessions, all routes protected
-- **Proxy config** — HTTP / SOCKS5 proxy settings, save to JSON, live reload
-- **DC Download Center** — search by URL/ID, preview, select quality, one-click download
-- **User browser** — view playlists and uploaded videos
-- **Quality selector** — 360p, 480p, 720p, 1080p, 2160p
-- **Download queue** — parallel downloads, cancel, clear
-- **i18n** — Chinese / English toggle (cookie-based)
-- **Cover proxy** — `/api/cover/:id` serves covers through engine
-- **Dark theme** — Geist fonts, geometric grid, staggered animations
+- **Login portal** — HMAC-signed cookie sessions, 24h expiry, all routes protected
+- **Proxy config** — HTTP / SOCKS5 proxy settings, saved to `/app/data/proxy-config.json`
+- **DC Download Center** — search by URL/ID, preview video info, select quality, one-click download
+- **Video detail page** — tags, description, cover, quality selector, collapsible metadata
+- **User browser** — view playlists and uploaded videos per author
+- **Playlist browser** — paginated video list with quality + download per item
+- **Quality selector** — dynamic: only shows qualities available from hanime1.me
+- **Download queue** — spawns hanime-dl-lite, error handling, cancel/clear
+- **Download progress bar** — HTMX-polled per-task progress indicator
+- **Download feedback** — alert() notification on queue success/failure
+- **RSS subscriptions** — configurable refresh interval (1h/3h/6h/12h/24h/off), dashboard
+- **Remote storage** — WebDAV/SMB/FTP/local, auto-transfer after download, connectivity test
+- **Direct to remote** — skip local disk, transfer then delete local copy
+- **i18n** — Chinese / English toggle (cookie-based, all UI text)
+- **Dark theme** — Geist fonts, geometric grid, staggered animations, responsive mobile nav
+- **Config persistence** — all settings in `/app/data/`, Docker volume-safe (EISDIR fix)
+- **Engine cache** — 5-min TTL for video_info, only caches successful results
 
 ## Authentication
 
-### How it works
-
 A login page (`/login`) guards the entire app. All routes redirect to `/login` unless a valid `auth` cookie is present. The cookie contains a timestamp + HMAC-SHA256 signature, HTTPOnly, valid for 24 hours.
-
-### Password setup
-
-The admin password is set via the `ADMIN_PASSWORD` environment variable:
 
 ```bash
 export ADMIN_PASSWORD="my-secure-password"
 ```
 
-If not set, it defaults to **`admin`** — change this before deploying to production.
-
-There is **no first-time setup wizard**. The password is whatever you set in the env var. If you forget it, restart the server with a new `ADMIN_PASSWORD`.
-
-### Logout
-
-The `<a href="/api/logout">Logout</a>` link in the sidebar clears the auth cookie and redirects to `/login`.
+Defaults to `admin` if not set. No first-time setup wizard. Logout via sidebar link clears cookie.
 
 ## Proxy Configuration
 
-Navigate to **Settings** (sidebar → System) to configure your proxy:
+Navigate to **Settings** → Proxy section. At least one proxy must be set for the engine to reach hanime1.me. Settings saved to `/app/data/proxy-config.json` — takes effect immediately.
 
-| Field | Description |
-|-------|-------------|
-| HTTP Proxy | e.g. `http://127.0.0.1:10808` |
-| SOCKS5 Proxy | e.g. `socks5://127.0.0.1:10809` |
+## Remote Storage
 
-At least one proxy must be set for the engine to reach hanime1.me. Settings are saved to `proxy-config.json` in the project root. The engine reads this file on every request, so changes take effect immediately — no restart needed.
+Navigate to **Settings** → Storage section. Supports:
+
+| Protocol | Test Command | Transfer Command |
+|----------|-------------|-----------------|
+| Local | skip | cp |
+| WebDAV | `curl -X PROPFIND` | `curl -T` |
+| SMB/CIFS | `smbclient -L` | `smbclient put` |
+| FTP | `curl -s` | `curl -T` |
+
+After download completes, files are automatically transferred to remote storage. Enable "Direct to remote" to delete local copies after transfer. Use **Test Connection** button to verify connectivity before saving.
+
+## RSS Subscriptions
+
+Navigate to **RSS** page → Dashboard. Configure refresh interval in Settings. The server periodically checks hanime1.me for new uploads from subscribed authors and displays them in the dashboard.
+
+## Docker Deployment
+
+### Quick Deploy
+
+```bash
+git clone https://github.com/JUUCHEN1/haime1-web.git
+cd haime1-web
+export ADMIN_PASSWORD="your-strong-password"
+docker compose up -d --build
+docker compose logs -f
+```
+
+### Volumes
+
+| Path | Description |
+|------|-------------|
+| `./data` | All persistent config (proxy, storage, RSS, session) |
+| `./downloads` | Video download output |
+
+### Environment Variables
+
+| Env | Default | Description |
+|-----|---------|-------------|
+| `PORT` | `3280` | Web server port |
+| `ADMIN_PASSWORD` | `admin` | Login password |
+| `SESSION_SECRET` | random | HMAC signing key for auth cookies |
+| `DL_DIR` | `/downloads` | Download output directory |
+| `HANIME_BIN` | `/app/hanime-dl-lite` | Downloader binary path |
+| `ENGINE_URL` | `http://127.0.0.1:5001` | Python engine URL |
+
+### Troubleshooting
+
+- **Engine can't reach hanime1.me**: configure HTTP/SOCKS5 proxy in Settings
+- **Locked out**: restart container with new `ADMIN_PASSWORD`
+- **Port conflict**: change `3280:3280` to e.g. `3281:3280`
+- **EISDIR errors**: ensure `./data` is mounted as directory, not individual files
+- **Download no feedback**: not a bug — uses `alert()` popup; check browser allows popups
+- **WebDAV 404**: clear the "Remote Path" field to `/`, save, then test
 
 ## API Routes
 
@@ -100,84 +144,30 @@ At least one proxy must be set for the engine to reach hanime1.me. Settings are 
 |-------|--------|-------------|
 | `/login` | GET | Login page |
 | `/api/login` | POST | Submit password, get auth cookie |
-| `/api/logout` | GET | Clear auth cookie, redirect to login |
-| `/settings` | GET | Proxy settings page |
+| `/api/logout` | GET | Clear auth cookie |
+| `/settings` | GET | Settings page (proxy, RSS, storage) |
 | `/api/proxy` | POST | Save proxy config |
+| `/api/storage` | POST | Save storage config |
+| `/api/storage/test` | POST | Test storage connectivity |
+| `/api/rss-interval` | POST | Set RSS refresh interval |
+| `/api/rss/dashboard` | GET | RSS dashboard HTML fragment |
 | `/` | GET | Home (Bento grid) |
 | `/dc/video` | GET | DC single video page |
 | `/dc/user` | GET | DC user page |
 | `/api/dc/preview/video/:id` | GET | Video preview HTML fragment |
 | `/api/dc/preview/user/:id` | GET | User playlists preview |
-| `/api/dl/video/:id?quality=` | POST | Queue video download |
+| `/api/dl/video/:id` | POST | Queue video download |
 | `/api/dl/playlist/:id` | POST | Queue playlist download |
 | `/api/dl/user/:id` | POST | Queue all user works |
-| `/api/dlstatus` | GET | Download queue JSON |
+| `/api/dlstatus` | GET | Download queue HTML fragment (progress bars) |
 | `/api/dlcancel/:id` | POST | Cancel download |
 | `/api/dlclear` | POST | Clear completed downloads |
 | `/api/cover/:id` | GET | Cover image proxy |
-| `/api/play/:id?quality=` | GET | Video player page |
+| `/api/video/title/:id` | GET | Lazy-load video title |
+| `/api/video/tags/:id` | GET | Lazy-load video tags |
+| `/play/:id` | GET | Video player page |
 | `/video/:id` | GET | Video detail page |
 | `/user/:id/playlists` | GET | User playlists |
 | `/playlist/:id` | GET | Playlist videos |
 | `/downloads` | GET | Download management page |
-
-## Config
-
-| Env | Default | Description |
-|-----|---------|-------------|
-| `PORT` | `3280` | Web server port |
-| `ADMIN_PASSWORD` | `admin` | Login password (**change before deploying!**) |
-| `SESSION_SECRET` | random | HMAC signing key for auth cookies |
-| `DL_DIR` | `~/Downloads/hanime` | Download output directory |
-| `ENGINE_URL` | `http://127.0.0.1:5001` | Python engine URL |
-| `PROXY_CONFIG_PATH` | `./proxy-config.json` | Proxy settings storage |
-
-## Docker Compose
-
-### Prerequisites
-
-- Docker + Docker Compose
-- A proxy (HTTP or SOCKS5) accessible from the container to reach hanime1.me
-
-### Deploy
-
-```bash
-# Clone
-git clone https://github.com/JUUCHEN1/haime1-web.git
-cd haime1-web
-
-# Set admin password
-export ADMIN_PASSWORD="your-strong-password"
-
-# Build & start (detached)
-docker compose up -d --build
-
-# Check logs
-docker compose logs -f
-
-# Stop
-docker compose down
-```
-
-Open `http://localhost:3280/login` — enter your admin password, then go to Settings to configure proxy.
-
-### Volumes
-
-| Path | Description |
-|------|-------------|
-| `./downloads` | Video download output |
-| `./proxy-config.json` | Proxy settings (persist across restarts) |
-
-### Architecture (Docker)
-
-```
-Browser ──► :3280 (Bun) ──► :5001 (Python engine) ──► proxy ──► hanime1.me
-                                                          │
-                                              proxy-config.json
-```
-
-### Troubleshooting
-
-- **Engine can't reach hanime1.me**: go to Settings and configure a valid HTTP or SOCKS5 proxy. Check that the proxy is accessible from inside the container (use `host.docker.internal` for host proxies).
-- **Locked out / forgot password**: restart the container with a new `ADMIN_PASSWORD` env var. Old sessions are invalidated if `SESSION_SECRET` also changes.
-- **Port conflict**: change `3280:3280` to e.g. `3281:3280` to use a different host port.
+| `/rss` | GET | RSS subscription page |
