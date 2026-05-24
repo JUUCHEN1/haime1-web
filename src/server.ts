@@ -179,7 +179,7 @@ const I = {
 
 // ─── Client JS ──────────────────────────────────────────────
 const i18nJS = (lang: Lang) => `<script>var _l='${lang}';function setLang(l){document.cookie='lang='+l+';path=/;max-age=31536000';localStorage.setItem('lang',l);location.reload()}
-document.addEventListener('click',function(e){var b=e.target.closest('[data-dl]');if(!b)return;var d=b.getAttribute('data-dl').split(':');(function(){var q='';var s=document.getElementById('dc-q');if(s)q=s.value;return fetch('/api/dl/'+d[0]+'/'+d[1]+(q?'?quality='+q:''),{method:'POST'})})().then(function(r){if(!r.ok)throw new Error(r.status+' '+r.statusText);return r.json()}).then(function(t){var s=document.getElementById('dl-s');if(s)s.textContent=_l==='en'?'Queued: '+t.label:'已加入: '+t.label;if(t.error){alert(_l==='en'?'Download error: '+t.error:'下载失败: '+t.error);return;}setTimeout(function(){location.reload()},800)}).catch(function(e){var s=document.getElementById('dl-s');if(s)s.textContent=_l==='en'?'Download failed':'下载失败';alert(_l==='en'?'Download failed: '+e.message:'下载失败: '+e.message)})});
+document.addEventListener('click',function(e){var b=e.target.closest('[data-dl]');if(!b)return;var d=b.getAttribute('data-dl').split(':');var type=d[0],id=d[1],qAttr=d[2]||'';(function(){var q=qAttr;var s=document.getElementById('dc-q');if(s&&s.value)q=s.value;return fetch('/api/dl/'+type+'/'+id+(q?'?quality='+q:''),{method:'POST'})})().then(function(r){if(!r.ok)throw new Error(r.status+' '+r.statusText);return r.json()}).then(function(t){if(t.error){alert(_l==='en'?'Download error: '+t.error:'下载失败: '+t.error);return;}alert(_l==='en'?'Queued: '+t.label:'已加入下载队列: '+t.label);setTimeout(function(){location.reload()},800)}).catch(function(e){alert(_l==='en'?'Download failed: '+e.message:'下载失败: '+e.message)})});
 function dcPreview(type){var inp=document.getElementById('dc-inp');var raw=(inp&&inp.value||'').trim();if(!raw){alert(_l==='zh'?'请输入URL或ID':'Enter URL or ID');return;}var id=raw;var m;if(type==='video'){m=raw.match(/v=([0-9]+)/);id=m?m[1]:raw;}else if(type==='user'){var p=raw.split('/user/');id=p[p.length-1]||raw;}id=String(id).replace(/[^0-9]/g,'');if(!id){alert(_l==='zh'?'无法识别ID':'Cannot recognize ID');return;}var btn=document.getElementById('dc-preview-btn');var pre=document.getElementById('dc-preview');if(btn){btn.disabled=true;btn.textContent='...';}if(pre)pre.innerHTML='<div class="emp"><div class="skel skel-t" style="margin:0 auto"></div><div class="skel skel-m" style="margin:8px auto 0;width:30%"></div></div>';fetch('/api/dc/preview/'+type+'/'+id).then(function(r){return r.text()}).then(function(html){if(pre)pre.innerHTML=html;if(btn){btn.disabled=false;btn.textContent=_l==='zh'?'查看':'Preview';}}).catch(function(e){if(pre)pre.innerHTML='<div class="emp"><div class="emp-t">Error</div><div class="emp-d">'+(e.message||e)+'</div></div>';if(btn){btn.disabled=false;btn.textContent=_l==='zh'?'查看':'Preview';}});}</script>`;
 
 // ─── Shell ──────────────────────────────────────────────────
@@ -758,7 +758,14 @@ app.get("/", ({ headers }) => hx(homePage(gl(headers)), gl(headers), t("home", g
 app.get("/user/:id/playlists", async ({ params: { id }, headers }) => {
   const l = gl(headers);
   const r = await getUserPlaylists(id);
-  return hx(plPage(r.playlists || [], id, l), l, `${t("user", l)} ${id}`, "", headers);
+  // Fetch author name for title
+  let authorName = id;
+  try {
+    const ENGINE = process.env.ENGINE_URL || "http://127.0.0.1:5001";
+    const nr = await fetch(ENGINE, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "user_name", user_id: id }) });
+    if (nr.ok) { const nd = await nr.json() as any; if (nd.name && nd.name !== `User ${id}`) authorName = nd.name; }
+  } catch {}
+  return hx(plPage(r.playlists || [], id, l), l, `${authorName}${authorName !== id ? ' (#'+id+')' : ' #'+id}`, "", headers);
 });
 app.get("/playlist/:id", async ({ params: { id }, headers }) => {
   const l = gl(headers);
