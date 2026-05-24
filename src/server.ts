@@ -1120,7 +1120,7 @@ function checkStorage(cfgIn?: any): string {
     const remote = url + (c.path || "");
     const creds = c.username ? `-u "${c.username}:${c.password}"` : "";
     if (c.protocol === "webdav") {
-      cmd = `curl -s -o /dev/null -w "%{http_code}" ${creds} -X PROPFIND "${remote}" 2>&1`;
+      cmd = `curl -sv --connect-timeout 8 -o /tmp/wdtest.txt -w "\\nHTTP_CODE:%{http_code}\\n" ${creds} -X PROPFIND "${remote}" 2>&1; echo "---STDOUT---"; cat /tmp/wdtest.txt 2>/dev/null; rm -f /tmp/wdtest.txt`;
     } else if (c.protocol === "smb") {
       const smbAuth = c.username ? `-U "${c.username}%${c.password}"` : "-N";
       const smbPath = `//${c.host}/${c.path}`;
@@ -1133,9 +1133,12 @@ function checkStorage(cfgIn?: any): string {
     const out = new TextDecoder().decode(r.stdout || r.stderr || new Uint8Array()).trim();
     // HTTP codes: 2xx = ok for webdav/ftp
     if (c.protocol === "webdav" || c.protocol === "ftp") {
-      const code = parseInt(out);
+      const match = out.match(/HTTP_CODE:(\d+)/);
+      const code = match ? parseInt(match[1]) : 0;
       if (code >= 200 && code < 400) return "ok";
-      return `HTTP ${out || code} on ${remote}`;
+      // Show just the error lines (not full verbose output)
+      const lines = out.split("\n").filter(l => l.includes("error") || l.includes("Error") || l.includes("HTTP") || l.includes("curl")).join("\n");
+      return (lines || out).slice(0, 300) || `HTTP ${code} on ${remote}`;
     }
     // SMB: exitCode === 0 means ok
     return r.exitCode === 0 ? "ok" : (out.slice(0, 200) || "smb connect failed");
