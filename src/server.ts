@@ -209,7 +209,6 @@ function shell(title: string, body: string, nav: string, lang: Lang): Response {
   <a href="/dc/video" class="${nav==='cv'?'active':''}">${I.film}<span>${t("dc_single",lang)}</span></a>
   <a href="/dc/user" class="${nav==='cu'?'active':''}">${I.usr}<span>${t("dc_user",lang)}</span></a>
   <a href="/downloads" class="${nav==='d'?'active':''}">${I.dl2}<span>${t("dl",lang)}</span></a>
-  <a href="/rss" class="${nav==='r'?'active':''}">${I.rss}<span>RSS</span></a>
   <a href="/settings" class="${nav==='s'?'active':''}">${I.zz}<span>${lang==='zh'?'设置':'Settings'}</span></a>
 </nav>
 </div></body></html>`,{headers:{"Content-Type":"text/html; charset=utf-8","Set-Cookie":`lang=${lang};path=/;max-age=31536000`}});
@@ -613,26 +612,9 @@ function rssPage(lang: Lang, subs: RssSub[], msg?: string): string {
 </div>
 ${msg ? `<div style="background:var(--green-dim);color:var(--green);padding:10px 16px;border-radius:var(--r-sm);font-size:.75rem;margin-bottom:14px;border:1px solid var(--green);font-family:var(--mono)">${msg}</div>` : ''}
 <div id="rss-body">
+  ${subs.length ? `<div class="bento-p"><div class="bento-b stagger">${items}</div></div>` : `<div class="emp"><div class="emp-icon">${I.dl2}</div><div class="emp-t">${t("rss_none",lang)}</div></div>`}
+</div></div>`;
 }
-
-function rssList(lang: Lang, subs: RssSub[], msg?: string): string {
-  const items = subs.map((s, i) => {
-    return `<div class="li" style="animation:slideUp .3s var(--ease) both;animation-delay:${i*40}ms">
-      <div class="li-th" style="background:var(--accent-dim);color:var(--accent);font-family:var(--mono);font-size:.65rem">RSS</div>
-      <div class="li-bd">
-        <div class="li-t">${esc(s.name && s.name !== s.user_id ? s.name : s.user_id)}</div>
-        <div class="li-m" style="font-family:var(--mono);font-size:.65rem">#${s.user_id} · ${lang==='zh'?'共':'Total'} ${s.last_count} ${lang==='zh'?'部':'videos'}</div>
-      </div>
-      <div class="li-act" style="display:flex;gap:4px">
-        <button class="btn btn-xs btn-p" hx-post="/api/rss/check/${s.user_id}" hx-target="#rss-body" hx-indicator="closest .li">${lang==='zh'?'检查':'Check'}</button>
-        <button class="btn btn-xs btn-g" hx-post="/api/rss/remove/${s.user_id}" hx-target="#rss-body" style="color:var(--accent);border-color:var(--accent-dim)">✕</button>
-      </div>
-    </div>`;
-  }).join('');
-  return `${msg ? `<div style="background:var(--green-dim);color:var(--green);padding:10px 16px;border-radius:var(--r-sm);font-size:.75rem;margin-bottom:14px;border:1px solid var(--green);font-family:var(--mono)">${msg}</div>` : ''}
-${subs.length ? `<div class="bento-p"><div class="bento-b stagger">${items}</div></div>` : `<div class="emp"><div class="emp-icon">${I.dl2}</div><div class="emp-t">${t("rss_none",lang)}</div></div>`}`;
-}
-
 
 
 // ─── Routes ─────────────────────────────────────────────────
@@ -838,7 +820,7 @@ app.post("/api/rss/check/:id", async ({ params: { id }, headers }) => {
   const msg = delta > 0
     ? (l === 'zh' ? `#${id} 有 ${delta} 部新作品！` : `#${id} has ${delta} new videos!`)
     : (l === 'zh' ? `#${id} 暂无更新` : `#${id} no updates`);
-  return new Response(rssList(l, subs, msg), { headers: { "Content-Type": "text/html" } });
+  return new Response(rssPage(l, subs, msg), { headers: { "Content-Type": "text/html" } });
 });
 app.post("/api/rss/remove/:id", async ({ params: { id }, headers }) => {
   if (!isAuthed(headers)) return Response.redirect("/login", 302);
