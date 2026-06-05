@@ -706,6 +706,7 @@ app.get("/", ({ headers }) => hx(homePage(gl(headers)), gl(headers), t("home", g
 app.get("/user/:id/playlists", async ({ params: { id }, headers }) => {
   const l = gl(headers);
   const r = await getUserPlaylists(id);
+  const playlists = r.playlists || [];
   // Fetch author name for title
   let authorName = id;
   try {
@@ -713,7 +714,17 @@ app.get("/user/:id/playlists", async ({ params: { id }, headers }) => {
     const nr = await fetch(ENGINE, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "user_name", user_id: id }) });
     if (nr.ok) { const nd = await nr.json() as any; if (nd.name && nd.name !== `User ${id}`) authorName = nd.name; }
   } catch {}
-  return hx(plPage(r.playlists || [], id, l), l, `${authorName}${authorName !== id ? ' (#'+id+')' : ' #'+id}`, "", headers);
+  if (!playlists.length) {
+    const uploaded = await getUserUploaded(id, 0);
+    const videos = uploaded.videos || [];
+    if (videos.length) {
+      const total = uploaded.count || videos.length;
+      const pages = uploaded.pages || Math.ceil(total / PER_PAGE) || 1;
+      cset(id, videos, total, pages);
+      return hx(upPage(videos.slice(0, PER_PAGE), total, 1, pages, id, l), l, `${authorName}${authorName !== id ? ' (#'+id+')' : ' #'+id}`, "", headers);
+    }
+  }
+  return hx(plPage(playlists, id, l), l, `${authorName}${authorName !== id ? ' (#'+id+')' : ' #'+id}`, "", headers);
 });
 app.get("/playlist/:id", async ({ params: { id }, headers }) => {
   const l = gl(headers);
@@ -805,7 +816,16 @@ app.get("/api/dc/preview/user/:id", async ({ params: { id }, headers }) => {
     const nr = await fetch(ENGINE, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "user_name", user_id: id }) });
     if (nr.ok) { const nd = await nr.json() as any; if (nd.name && nd.name !== `User ${id}`) authorName = nd.name; }
   } catch {}
-  if (!pls.length) return new Response(`<div class="emp"><div class="emp-t">${t("dc_no_result", l)}</div></div>`, { headers: { "Content-Type": "text/html" } });
+  if (!pls.length) {
+    const uploaded = await getUserUploaded(id, 1);
+    const videos = uploaded.videos || [];
+    if (!videos.length) return new Response(`<div class="emp"><div class="emp-t">${t("dc_no_result", l)}</div></div>`, { headers: { "Content-Type": "text/html" } });
+    const vhtml = videos.slice(0, 12).map(v => `<a href="/video/${v}" class="li"><div class="li-th"><img src="/api/cover/${v}" loading="lazy" style="width:100%;height:100%;object-fit:cover" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span style="display:none;font-size:.6rem;color:var(--fg4);font-family:var(--mono);align-items:center;justify-content:center;width:100%;height:100%">#${v}</span></div><div class="li-bd"><div class="li-t" hx-get="/api/video/title/${v}" hx-trigger="load" hx-swap="innerHTML">#${v}</div><div class="li-m">#${v}</div></div><div class="li-act">${I.ch}</div></a>`).join("");
+    return new Response(`<div class="bento-p" style="animation:scaleIn .3s var(--ease) both">
+  <div class="bento-h"><div class="bento-hl">${I.usr} ${esc(authorName)}</div><div class="bento-count">${uploaded.count || videos.length}</div></div>
+  <div style="padding:8px 16px;border-bottom:1px solid var(--bd)"><button class="btn btn-p btn-sm" data-dl="user:${id}">${I.dl} ${t("dl_works", l)} (${uploaded.count || videos.length})</button></div>
+  <div class="bento-b stagger">${vhtml}</div></div>`, { headers: { "Content-Type": "text/html" } });
+  }
   const phtml = pls.map(p => `<a href="/playlist/${p.id}" class="li"><div class="li-th" style="background:var(--accent-bg);color:var(--accent);font-family:var(--mono)">PL</div><div class="li-bd"><div class="li-t">${esc(p.title)}</div><div class="li-m">#${p.id}</div></div><div class="li-act">${I.ch}</div></a>`).join("");
   return new Response(`<div class="bento-p" style="animation:scaleIn .3s var(--ease) both">
   <div class="bento-h"><div class="bento-hl">${I.usr} ${esc(authorName)}</div><div class="bento-count">${pls.length}</div></div>

@@ -13,13 +13,15 @@ import re
 import sys
 import time
 import warnings
+from html import unescape
+from urllib.parse import urljoin
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import cloudscraper
 
 warnings.filterwarnings("ignore")
 
-MAX_RETRIES = 2
+MAX_RETRIES = 3
 RETRY_DELAY = 1
 BASE_URL = "https://hanime1.me"
 
@@ -57,7 +59,67 @@ def create_scraper():
 
 
 def clean_name(name: str) -> str:
-    return re.sub(r'[\\/:*?"<>|]', '_', name).strip()[:200]
+    return re.sub(r'[\\/:*?"<>|]', '_', strip_html(name)).strip()[:200]
+
+
+def strip_html(value: str) -> str:
+    return unescape(re.sub(r'<[^>]+>', '', value or '').replace('&nbsp;', ' ')).strip()
+
+
+def normalize_url(url: str) -> str:
+    if not url:
+        return ""
+    return urljoin(BASE_URL, unescape(url).strip())
+
+
+def fetch_page(scraper, url: str, label: str, timeout=20, min_len=200):
+    last = None
+    for i in range(MAX_RETRIES):
+        try:
+            r = scraper.get(url, timeout=timeout)
+            last = r
+            body_len = len(getattr(r, "text", "") or "")
+            print(f"[engine] {label} attempt {i+1}: HTTP {r.status_code} len={body_len}", file=sys.stderr, flush=True)
+            if r.status_code == 200 and body_len >= min_len:
+                return r
+            if r.status_code == 429:
+                wait = int(r.headers.get("Retry-After", RETRY_DELAY))
+            else:
+                wait = RETRY_DELAY * (2 ** i)
+            if i < MAX_RETRIES - 1:
+                time.sleep(wait)
+        except Exception as e:
+            print(f"[engine] {label} attempt {i+1}: {e}", file=sys.stderr, flush=True)
+            if i < MAX_RETRIES - 1:
+                time.sleep(RETRY_DELAY * (2 ** i))
+    return last
+
+
+def quality_key(q: str) -> int:
+    m = re.search(r'(\d+)', q or "")
+    return int(m.group(1)) if m else 0
+
+
+def extract_cover_url(html: str) -> str:
+    patterns = [
+        r'<img[^>]*class="[^"]*download-image[^"]*"[^>]*(?:src|data-src|data-original)="([^"]+)"',
+        r'<img[^>]*(?:src|data-src|data-original)="([^"]+)"[^>]*class="[^"]*download-image[^"]*"',
+        r'<meta[^>]*(?:property|name)="og:image"[^>]*content="([^"]+)"',
+        r'<meta[^>]*content="([^"]+)"[^>]*(?:property|name)="og:image"',
+        r'<meta[^>]*(?:property|name)="twitter:image"[^>]*content="([^"]+)"',
+        r'<link[^>]*rel="image_src"[^>]*href="([^"]+)"',
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+        if m:
+            return normalize_url(m.group(1))
+    # Last resort: pick the first plausible image URL from page HTML.
+    imgs = re.findall(r'(?:src|data-src|data-original)="([^"]+\.(?:jpg|jpeg|png|webp)(?:\?[^"]*)?)"', html, re.IGNORECASE)
+    for img in imgs:
+        if any(x in img.lower() for x in ("avatar", "logo", "icon")):
+            continue
+        return normalize_url(img)
+    return ""
 
 
 def extract_video_ids(html: str) -> list[str]:
@@ -79,7 +141,7 @@ def extract_video_ids(html: str) -> list[str]:
         pos = end + 1
     # Pattern 2: href with watch?v=ID
     if not ids:
-        ids.update(re.findall(r'href="[^"]*watch\?v=(\d+)"', html))
+        ids.update(re.findall(r'href=["\'][^"\']*watch\?v=(\d+)', html))
     # Pattern 3: Any occurrence of /watch?v=ID in href or onclick
     if not ids:
         ids.update(re.findall(r'watch\?v=(\d+)', html))
@@ -91,13 +153,12 @@ def extract_video_ids(html: str) -> list[str]:
 
 def action_user_playlists(scraper, user_id: str):
     url = f"{BASE_URL}/user/{user_id}/playlists"
-    r = scraper.get(url, timeout=20)
-    print(f"[engine] user_playlists {user_id}: HTTP {r.status_code} len={len(r.text)}", file=sys.stderr, flush=True)
-    if r.status_code != 200:
-        return {"error": f"HTTP {r.status_code}", "playlists": []}
-    playlist_ids = sorted(set(re.findall(
-        r'href="https://hanime1\.me/playlist\?list=(\d+)"', r.text)))
-    titles = re.findall(r'<div title="([^"]*)"', r.text)
+    r = fetch_page(scraper, url, f"user_playlists {user_id}")
+    if not r or r.status_code != 200:
+        status = getattr(r, "status_code", "no response")
+        return {"error": f"HTTP {status}", "playlists": []}
+    playlist_ids = sorted(set(re.findall(r'href=["\'][^"\']*playlist\?list=(\d+)', r.text)))
+    titles = re.findall(r'<div[^>]*title="([^"]*)"', r.text)
     playlists = []
     for i, pid in enumerate(playlist_ids):
         title = titles[i] if i < len(titles) else f"playlist_{pid}"
@@ -129,39 +190,39 @@ def action_playlist_videos(scraper, playlist_id: str):
 
 def action_video_info(scraper, video_id: str):
     url = f"{BASE_URL}/download?v={video_id}"
-    for i in range(MAX_RETRIES):
-        r = scraper.get(url, timeout=20)
-        print(f"[engine] video_info {video_id} attempt {i+1}: HTTP {r.status_code} len={len(r.text)}", file=sys.stderr, flush=True)
-        if r.status_code == 200:
-            title_match = re.search(r'<h3[^>]*>(.*?)</h3>', r.text, re.DOTALL)
-            title = title_match.group(1).strip() if title_match else f"video_{video_id}"
-            img_match = re.search(r'<img[^>]*class="download-image"[^>]*src="([^"]+)"', r.text)
-            cover_url = img_match.group(1) if img_match else ""
-            links = re.findall(r'<a[^>]*data-url="([^"]+)"[^>]*>(.*?)</a>', r.text, re.DOTALL)
-            videos = {}
-            for data_url, link_html in links:
-                data_url = data_url.replace('&amp;', '&')
-                q_match = re.search(r'-(\d+p)\.', data_url)
-                quality = q_match.group(1) if q_match else "unknown"
-                videos[quality] = data_url
-            if not videos:
-                hrefs = re.findall(r'<a[^>]*href="(https://[^"]+\.(mp4|m3u8)[^"]*)"[^>]*>', r.text)
-                for j, du in enumerate(list(set(h[0] for h in hrefs))):
-                    q_match = re.search(r'-(\d+p)\.', du)
-                    quality = q_match.group(1) if q_match else f"link_{j}"
-                    videos[quality] = du
-            return {
-                "video_id": video_id, "title": title, "safe_title": clean_name(title),
-                "cover_url": cover_url, "videos": videos,
-                "qualities": sorted(videos.keys(), key=lambda x: int(x.replace('p', '')), reverse=True),
-            }
-        elif r.status_code == 429:
-            wait = int(r.headers.get("Retry-After", RETRY_DELAY))
-            print(f"  rate limited, waiting {wait}s", file=sys.stderr)
-            time.sleep(wait)
-        else:
-            if i < MAX_RETRIES - 1:
-                time.sleep(1 * (2**i))  # exponential backoff
+    r = fetch_page(scraper, url, f"video_info {video_id}")
+    if r and r.status_code == 200:
+        title_match = re.search(r'<h3[^>]*>(.*?)</h3>', r.text, re.DOTALL)
+        if not title_match:
+            title_match = re.search(r'<title>(.*?)</title>', r.text, re.DOTALL)
+        title = strip_html(title_match.group(1)) if title_match else f"video_{video_id}"
+        cover_url = extract_cover_url(r.text)
+        if not cover_url:
+            try:
+                wr = fetch_page(scraper, f"{BASE_URL}/watch?v={video_id}", f"video_cover_watch {video_id}", timeout=15, min_len=200)
+                if wr and wr.status_code == 200:
+                    cover_url = extract_cover_url(wr.text)
+            except Exception:
+                pass
+        links = re.findall(r'<a[^>]*data-url="([^"]+)"[^>]*>(.*?)</a>', r.text, re.DOTALL)
+        videos = {}
+        for data_url, link_html in links:
+            data_url = unescape(data_url)
+            q_match = re.search(r'-(\d+p)\.', data_url)
+            quality = q_match.group(1) if q_match else "unknown"
+            videos[quality] = data_url
+        if not videos:
+            hrefs = re.findall(r'<a[^>]*href="(https://[^"]+\.(?:mp4|m3u8)[^"]*)"[^>]*>', r.text)
+            for j, du in enumerate(sorted(set(hrefs))):
+                du = unescape(du)
+                q_match = re.search(r'-(\d+p)\.', du)
+                quality = q_match.group(1) if q_match else f"link_{j}"
+                videos[quality] = du
+        return {
+            "video_id": video_id, "title": title, "safe_title": clean_name(title),
+            "cover_url": cover_url, "videos": videos,
+            "qualities": sorted(videos.keys(), key=quality_key, reverse=True),
+        }
     return {"error": "failed to fetch", "video_id": video_id}
 
 
@@ -174,10 +235,10 @@ def action_user_uploaded(scraper, user_id: str, page=1):
             url = f"{BASE_URL}/user/{user_id}/uploaded"
             if page_num > 1:
                 url += f"?page={page_num}"
-            r = scraper.get(url, timeout=20)
-            if r.status_code != 200:
+            r = fetch_page(scraper, url, f"user_uploaded {user_id} page {page_num}")
+            if not r or r.status_code != 200:
                 break
-            ids = set(re.findall(r'href="https://hanime1\.me/watch\?v=(\d+)"', r.text))
+            ids = set(extract_video_ids(r.text))
             if not ids:
                 break
             all_ids.update(ids)
@@ -188,10 +249,11 @@ def action_user_uploaded(scraper, user_id: str, page=1):
         url = f"{BASE_URL}/user/{user_id}/uploaded"
         if page_num > 1:
             url += f"?page={page_num}"
-        r = scraper.get(url, timeout=20)
-        if r.status_code != 200:
-            return {"user_id": user_id, "videos": [], "count": 0, "page": page_num, "error": f"HTTP {r.status_code}"}
-        ids = sorted(set(re.findall(r'href="https://hanime1\.me/watch\?v=(\d+)"', r.text)))
+        r = fetch_page(scraper, url, f"user_uploaded {user_id} page {page_num}")
+        if not r or r.status_code != 200:
+            status = getattr(r, "status_code", "no response")
+            return {"user_id": user_id, "videos": [], "count": 0, "page": page_num, "error": f"HTTP {status}"}
+        ids = extract_video_ids(r.text)
         return {"user_id": user_id, "videos": ids, "count": len(ids), "page": page_num}
 
 
@@ -201,7 +263,7 @@ def action_download_url(scraper, video_id: str, quality: str = "1080p"):
         return {"error": info["error"]}
     dl_url = info["videos"].get(quality)
     if not dl_url and info["videos"]:
-        quals = sorted(info["videos"].keys(), key=lambda x: int(x.replace('p', '')), reverse=True)
+        quals = sorted(info["videos"].keys(), key=quality_key, reverse=True)
         dl_url = info["videos"][quals[0]]
         quality = quals[0] if quals else quality
     if not dl_url:
