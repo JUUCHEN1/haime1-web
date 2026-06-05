@@ -156,6 +156,10 @@ def extract_video_details(html: str) -> tuple[list[str], str]:
 def extract_author_profile(html: str, user_id: str) -> dict:
     name = ""
     for pattern in [
+        r'<h1[^>]*class=["\'][^"\']*profile-display-name[^"\']*["\'][^>]*>(.*?)</h1>',
+        r'<div[^>]*class=["\'][^"\']*profile-display-name[^"\']*["\'][^>]*>(.*?)</div>',
+        r'<span[^>]*class=["\'][^"\']*profile-display-name[^"\']*["\'][^>]*>(.*?)</span>',
+        r'alt=["\']([^"\']+)["\'][^>]*>',
         r'<h3[^>]*>(.*?)</h3>',
         r'<meta[^>]*property=["\']og:title["\'][^>]*content=["\']([^"\']*)',
         r'<title>(.*?)</title>',
@@ -170,6 +174,9 @@ def extract_author_profile(html: str, user_id: str) -> dict:
 
     avatar = ""
     avatar_patterns = [
+        r'--avatar-url:\s*url\(["\']?([^)"\']+)',
+        r'<div[^>]*class=["\'][^"\']*profile-avatar-wrapper[^"\']*["\'][\s\S]*?<img[^>]*(?:src|data-src)=["\']([^"\']+)',
+        r'<img[^>]*(?:src|data-src)=["\']([^"\']+)["\'][^>]*alt=["\']' + re.escape(name) + r'["\']',
         r'<img[^>]*class=["\'][^"\']*(?:avatar|user|profile)[^"\']*["\'][^>]*(?:src|data-src)="([^"\']+)"',
         r'<img[^>]*(?:src|data-src)="([^"\']+)"[^>]*class=["\'][^"\']*(?:avatar|user|profile)[^"\']*["\']',
         r'<meta[^>]*property=["\']og:image["\'][^>]*content=["\']([^"\']*)',

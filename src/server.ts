@@ -448,7 +448,7 @@ async function fetchAuthorProfile(userId: string): Promise<{ name: string; avata
 async function refreshRssProfiles(subs: RssSub[]): Promise<RssSub[]> {
   let changed = false;
   for (const sub of subs) {
-    if (!sub.avatar || !sub.name || sub.name === sub.user_id || sub.name.startsWith("User ")) {
+    if (!sub.avatar || isBadRssName(sub.name, sub.user_id)) {
       const profile = await fetchAuthorProfile(sub.user_id);
       if (profile.name && profile.name !== sub.name) {
         sub.name = profile.name;
@@ -462,6 +462,12 @@ async function refreshRssProfiles(subs: RssSub[]): Promise<RssSub[]> {
   }
   if (changed) saveRss(subs);
   return subs;
+}
+
+function isBadRssName(name: string | undefined, userId: string): boolean {
+  if (!name) return true;
+  if (name === userId || name.startsWith("User ")) return true;
+  return /arrow_forward_ios|查看更多|查看|影片|我的清單|Hanime1/i.test(name);
 }
 
 function rssAuthorThumb(sub: RssSub): string {
@@ -660,7 +666,7 @@ app.get("/api/rss/dashboard", async ({ headers }) => {
     return `<div class="li" style="border-left:2px solid var(--accent);--i:${i*.05}">
       <div class="li-th" style="background:var(--accent-dim);color:var(--accent);font-size:.65rem;font-family:var(--mono);overflow:hidden">${rssAuthorThumb(u.sub)}</div>
       <div class="li-bd">
-        <div class="li-t">${I.rss} ${esc(name)}</div>
+        <div class="li-t">${esc(name)}</div>
         <div class="li-m" style="font-family:var(--mono)">+${u.delta} ${l==='zh'?'部新作品':'new videos'} &middot; ${l==='zh'?'共':'Total'} ${u.current}</div>
       </div>
       <div class="li-act">
