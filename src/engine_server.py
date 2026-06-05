@@ -122,6 +122,59 @@ def extract_cover_url(html: str) -> str:
     return ""
 
 
+def extract_video_details(html: str) -> tuple[list[str], str]:
+    raw_tags = re.findall(r'<a[^>]*href=["\'][^"\']*tag[^"\']*["\'][^>]*>(.*?)</a>', html, re.IGNORECASE | re.DOTALL)
+    if not raw_tags:
+        raw_tags = re.findall(r'<a[^>]*class=["\'][^"\']*(?:badge|tag)[^"\']*["\'][^>]*>(.*?)</a>', html, re.IGNORECASE | re.DOTALL)
+    tags = []
+    seen = set()
+    for raw in raw_tags:
+        tag = strip_html(raw)
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        tags.append(tag)
+        if len(tags) >= 12:
+            break
+
+    desc = ""
+    desc_patterns = [
+        r'<meta[^>]*name=["\']description["\'][^>]*content=["\']([^"\']*)',
+        r'<meta[^>]*property=["\']og:description["\'][^>]*content=["\']([^"\']*)',
+        r'<meta[^>]*content=["\']([^"\']*)["\'][^>]*(?:name|property)=["\'](?:description|og:description)["\']',
+        r'<div[^>]*class=["\'][^"\']*(?:description|video-description|watch-description)[^"\']*["\'][^>]*>(.*?)</div>',
+    ]
+    for pattern in desc_patterns:
+        m = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+        if m:
+            desc = strip_html(m.group(1))[:800]
+            if desc:
+                break
+    return tags, desc
+
+
+def cover_candidates(scraper, video_id: str, info=None) -> list[str]:
+    candidates = []
+    if info and info.get("cover_url"):
+        candidates.append(normalize_url(info["cover_url"]))
+    for url, label in [
+        (f"{BASE_URL}/watch?v={video_id}", f"cover_watch {video_id}"),
+        (f"{BASE_URL}/download?v={video_id}", f"cover_download {video_id}"),
+    ]:
+        r = fetch_page(scraper, url, label, timeout=15, min_len=200)
+        if r and r.status_code == 200:
+            cover = extract_cover_url(r.text)
+            if cover:
+                candidates.append(cover)
+    out = []
+    seen = set()
+    for item in candidates:
+        if item and item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
+
+
 def extract_video_ids(html: str) -> list[str]:
     ids = set()
     # Pattern 1: data-href with watch?v=ID
@@ -169,9 +222,8 @@ def action_user_playlists(scraper, user_id: str):
 def action_playlist_videos(scraper, playlist_id: str):
     url = f"{BASE_URL}/playlist?list={playlist_id}"
     for i in range(MAX_RETRIES):
-        r = scraper.get(url, timeout=20)
-        print(f"[engine] playlist_videos {playlist_id} attempt {i+1}: HTTP {r.status_code} len={len(r.text)}", file=sys.stderr, flush=True)
-        if r.status_code == 200:
+        r = fetch_page(scraper, url, f"playlist_videos {playlist_id}", timeout=20, min_len=100)
+        if r and r.status_code == 200:
             ids = extract_video_ids(r.text)
             print(f"[engine] playlist_videos {playlist_id}: extracted {len(ids)} video IDs", file=sys.stderr, flush=True)
             if not ids and len(r.text) < 30000 and i < MAX_RETRIES - 1:
@@ -183,7 +235,7 @@ def action_playlist_videos(scraper, playlist_id: str):
                 hrefs = re.findall(r'href="([^"]+)"', sample)[:10]
                 print(f"[engine] playlist_videos {playlist_id}: no IDs found, sample hrefs: {hrefs}", file=sys.stderr, flush=True)
             return {"playlist_id": playlist_id, "videos": ids, "count": len(ids)}
-        elif r.status_code != 200 and i < MAX_RETRIES - 1:
+        elif (not r or r.status_code != 200) and i < MAX_RETRIES - 1:
             time.sleep(1 * (2**i))
     return {"playlist_id": playlist_id, "videos": [], "count": 0, "error": "failed after retries"}
 
@@ -349,19 +401,19 @@ class EngineHandler(BaseHTTPRequestHandler):
             elif action == "video_tags":
                 vid = request.get("video_id", "")
                 try:
-                    r = self.scraper.get(f"{BASE_URL}/watch?v={vid}", timeout=15)
-                    if r.status_code == 200:
-                        raw_tags = re.findall(r'<a[^>]*href="[^"]*tag[^"]*"[^>]*>(.*?)</a>', r.text, re.DOTALL)
-                        if not raw_tags:
-                            raw_tags = re.findall(r'<a[^>]*class="[^"]*badge[^"]*"[^>]*>(.*?)</a>', r.text, re.DOTALL)
-                        # Strip HTML from tag text (e.g. <span>(6)</span> -> (6), &nbsp; -> space)
-                        tags = [re.sub(r'<[^>]+>', '', t).replace('&nbsp;', ' ').strip() for t in raw_tags if t.strip()][:10]
-                        desc_match = re.search(r'<meta[^>]*name="description"[^>]*content="([^"]*)"', r.text)
-                        result["tags"] = tags
-                        result["description"] = desc_match.group(1).strip()[:500] if desc_match else ""
-                    else:
-                        result["tags"] = []
-                        result["description"] = ""
+                    self._rate_limit()
+                    tags, desc = [], ""
+                    for url, label in [
+                        (f"{BASE_URL}/watch?v={vid}", f"video_tags_watch {vid}"),
+                        (f"{BASE_URL}/download?v={vid}", f"video_tags_download {vid}"),
+                    ]:
+                        r = fetch_page(self.scraper, url, label, timeout=15, min_len=200)
+                        if r and r.status_code == 200:
+                            tags, desc = extract_video_details(r.text)
+                            if tags or desc:
+                                break
+                    result["tags"] = tags
+                    result["description"] = desc
                 except Exception as e:
                     result["tags"] = []
                     result["description"] = ""
@@ -386,11 +438,12 @@ class EngineHandler(BaseHTTPRequestHandler):
             elif action == "cover":
                 video_id = request.get("video_id", "")
                 info = self._cached_video_info(video_id)
-                if info.get("cover_url"):
-                    r = self.scraper.get(info["cover_url"], headers={"Referer": f"{BASE_URL}/"})
-                    if r.status_code == 200:
+                for cover_url in cover_candidates(self.scraper, video_id, info):
+                    r = self.scraper.get(cover_url, headers={"Referer": f"{BASE_URL}/"}, timeout=15)
+                    ctype = r.headers.get("Content-Type", "image/jpeg")
+                    if r.status_code == 200 and ("image" in ctype or len(r.content) > 1024):
                         self.send_response(200)
-                        self.send_header("Content-Type", r.headers.get("Content-Type", "image/jpeg"))
+                        self.send_header("Content-Type", ctype)
                         self.send_header("Cache-Control", "public, max-age=86400")
                         self.send_header("Content-Length", str(len(r.content)))
                         self.end_headers()

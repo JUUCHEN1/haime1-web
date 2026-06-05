@@ -179,7 +179,7 @@ function vlPage(videos: string[], title: string, backUrl: string, lang: Lang, dl
       <button class="tag-toggle mt4" style="font-size:.56rem;padding:2px 7px;border:1px solid var(--bd2);border-radius:var(--r-sm);background:var(--bg2);color:var(--fg4);cursor:pointer;font-family:var(--mono);letter-spacing:.04em;transition:all var(--tr-fast)"
         onclick="var d=document.getElementById('vtags-${v}');var b=this;
         if(d.style.display==='none'){d.style.display='block';b.textContent='▲ ${lang==='zh'?'收起':'Collapse'}';b.style.color='var(--accent)';b.style.borderColor='var(--accent-dim)';
-          if(!d.dataset.loaded){d.dataset.loaded='1';fetch('/api/video/tags/${v}').then(r=>r.text()).then(h=>{d.innerHTML=h;});}}
+          if(!d.dataset.loaded){d.dataset.loaded='1';fetch('/api/video/tags/${v}').then(r=>r.text()).then(h=>{d.innerHTML=h||'<div style=&quot;opacity:.55&quot;>${lang==='zh'?'暂无详细介绍':'No details available'}</div>';}).catch(()=>{d.innerHTML='<div style=&quot;opacity:.55&quot;>${lang==='zh'?'详细介绍加载失败':'Failed to load details'}</div>';});}}
         else{d.style.display='none';b.textContent='▼ ${lang==='zh'?'标签':'Tags'}';b.style.color='var(--fg4)';b.style.borderColor='var(--bd2)';}">▼ ${lang==='zh'?'标签':'Tags'}</button>
     </div>
     <div class="li-act btn-grp" style="align-self:flex-start">
@@ -235,7 +235,7 @@ function vdPage(info: VideoInfoResult, lang: Lang): string {
         <button class="btn btn-g btn-sm" style="font-size:.7rem" onclick="
           var d=document.getElementById('vtags-${info.video_id}');var b=this;
           if(d.style.display==='none'){d.style.display='block';b.textContent='${lang==='zh'?'收起':'Collapse'} ▲';b.style.color='var(--accent)';b.style.borderColor='var(--accent-dim)';
-            if(!d.dataset.loaded){d.dataset.loaded='1';fetch('/api/video/tags/${info.video_id}').then(r=>r.text()).then(h=>{d.innerHTML=h;});}}
+            if(!d.dataset.loaded){d.dataset.loaded='1';fetch('/api/video/tags/${info.video_id}').then(r=>r.text()).then(h=>{d.innerHTML=h||'<div style=&quot;opacity:.55&quot;>${lang==='zh'?'暂无详细介绍':'No details available'}</div>';}).catch(()=>{d.innerHTML='<div style=&quot;opacity:.55&quot;>${lang==='zh'?'详细介绍加载失败':'Failed to load details'}</div>';});}}
           else{d.style.display='none';b.textContent='${lang==='zh'?'详细':'Details'} ▼';b.style.color='var(--fg4)';b.style.borderColor='var(--bd2)';}
         ">${lang==='zh'?'详细':'Details'} ▼</button>
       </div>
