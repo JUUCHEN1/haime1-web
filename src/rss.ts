@@ -5,8 +5,11 @@ import { safeReadJSON, safeWriteJSON } from "./store";
 export interface RssSub {
   user_id: string;
   name: string;
+  avatar?: string;
   last_count: number;
   added_at: number;
+  last_checked_at?: number;
+  last_new_count?: number;
 }
 
 export function loadRss(): RssSub[] {

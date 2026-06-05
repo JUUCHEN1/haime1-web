@@ -426,13 +426,58 @@ function settingsPage(lang: Lang, saved?: boolean, pwdMsg?: string, storageMsg?:
 </div></div>`;
 }
 // ─── RSS page ──────────────────────────────────────────────
-function rssPage(lang: Lang, subs: RssSub[], msg?: string): string {
+async function fetchAuthorProfile(userId: string): Promise<{ name: string; avatar: string }> {
+  try {
+    const ENGINE = process.env.ENGINE_URL || "http://127.0.0.1:5001";
+    const r = await fetch(ENGINE, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "user_profile", user_id: userId }),
+    });
+    if (!r.ok) return { name: `User ${userId}`, avatar: "" };
+    const data = await r.json() as any;
+    return {
+      name: data.name && data.name !== userId ? String(data.name) : `User ${userId}`,
+      avatar: String(data.avatar || ""),
+    };
+  } catch {
+    return { name: `User ${userId}`, avatar: "" };
+  }
+}
+
+async function refreshRssProfiles(subs: RssSub[]): Promise<RssSub[]> {
+  let changed = false;
+  for (const sub of subs) {
+    if (!sub.avatar || !sub.name || sub.name === sub.user_id || sub.name.startsWith("User ")) {
+      const profile = await fetchAuthorProfile(sub.user_id);
+      if (profile.name && profile.name !== sub.name) {
+        sub.name = profile.name;
+        changed = true;
+      }
+      if (profile.avatar && profile.avatar !== sub.avatar) {
+        sub.avatar = profile.avatar;
+        changed = true;
+      }
+    }
+  }
+  if (changed) saveRss(subs);
+  return subs;
+}
+
+function rssAuthorThumb(sub: RssSub): string {
+  const label = esc((sub.name || sub.user_id).slice(0, 2).toUpperCase());
+  if (sub.avatar) {
+    return `<img src="${esc(sub.avatar)}" loading="lazy" alt="" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span style="display:none;align-items:center;justify-content:center;width:100%;height:100%;font-size:.62rem">${label}</span>`;
+  }
+  return `<span style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:.62rem">${label}</span>`;
+}
+
+function rssBody(lang: Lang, subs: RssSub[], msg?: string): string {
   const items = subs.map((s, i) => {
-    const delta = s.last_count > 0 && (i as any) !== undefined ? '' : '';
     return `<div class="li" style="animation:slideUp .3s var(--ease) both;animation-delay:${i*40}ms">
-      <div class="li-th" style="background:var(--accent-dim);color:var(--accent);font-family:var(--mono);font-size:.65rem">RSS</div>
+      <div class="li-th" style="background:var(--accent-dim);color:var(--accent);font-family:var(--mono);font-size:.65rem;overflow:hidden">${rssAuthorThumb(s)}</div>
       <div class="li-bd">
-        <div class="li-t">${esc(s.name && s.name !== s.user_id ? s.name : s.user_id)}</div>
+        <div class="li-t">${esc(s.name && s.name !== s.user_id ? s.name : `User ${s.user_id}`)}</div>
         <div class="li-m" style="font-family:var(--mono);font-size:.65rem">#${s.user_id} &middot; ${lang==='zh'?'共':'Total'} ${s.last_count} ${lang==='zh'?'部':'videos'}</div>
       </div>
       <div class="li-act" style="display:flex;gap:4px">
@@ -441,6 +486,11 @@ function rssPage(lang: Lang, subs: RssSub[], msg?: string): string {
       </div>
     </div>`;
   }).join('');
+  return `${msg ? `<div style="background:var(--green-dim);color:var(--green);padding:10px 16px;border-radius:var(--r-sm);font-size:.75rem;margin-bottom:14px;border:1px solid var(--green);font-family:var(--mono)">${esc(msg)}</div>` : ''}
+  ${subs.length ? `<div class="bento-p"><div class="bento-b stagger">${items}</div></div>` : `<div class="emp"><div class="emp-icon">${I.dl2}</div><div class="emp-t">${t("rss_none",lang)}</div></div>`}`;
+}
+
+function rssPage(lang: Lang, subs: RssSub[], msg?: string): string {
   return `<div style="animation:scaleIn .35s var(--ease) both">
 <div class="bento-p mb20">
   <div class="bento-h"><div class="bento-hl">${I.dl2} ${t("rss",lang)}</div></div>
@@ -452,9 +502,8 @@ function rssPage(lang: Lang, subs: RssSub[], msg?: string): string {
     </form>
   </div>
 </div>
-${msg ? `<div style="background:var(--green-dim);color:var(--green);padding:10px 16px;border-radius:var(--r-sm);font-size:.75rem;margin-bottom:14px;border:1px solid var(--green);font-family:var(--mono)">${msg}</div>` : ''}
 <div id="rss-body">
-  ${subs.length ? `<div class="bento-p"><div class="bento-b stagger">${items}</div></div>` : `<div class="emp"><div class="emp-icon">${I.dl2}</div><div class="emp-t">${t("rss_none",lang)}</div></div>`}
+  ${rssBody(lang, subs, msg)}
 </div></div>`;
 }
 
@@ -579,7 +628,7 @@ app.post("/api/rss-interval", async ({ body, headers }) => {
 app.get("/api/rss/dashboard", async ({ headers }) => {
   if (!isAuthed(headers)) return new Response("", { headers: { "Content-Type": "text/html" } });
   const l = gl(headers);
-  const subs = loadRss();
+  const subs = await refreshRssProfiles(loadRss());
   if (!subs.length) return new Response(`<div class="emp"><div style="font-size:.7rem;color:var(--fg4)">${l==='zh'?'暂无订阅，前往 RSS 页面添加':'No subscriptions, visit RSS page to add'}</div></div>`, { headers: { "Content-Type": "text/html" } });
   
   const results = await Promise.all(subs.map(async (s) => {
@@ -589,22 +638,29 @@ app.get("/api/rss/dashboard", async ({ headers }) => {
   }));
   
   const updated = results.filter(x => x.delta > 0);
+  for (const result of results) {
+    const si = subs.findIndex(s => s.user_id === result.sub.user_id);
+    if (si >= 0) {
+      subs[si].last_checked_at = Date.now();
+      subs[si].last_new_count = Math.max(0, result.delta);
+    }
+  }
   for (const u of updated) {
     const si = subs.findIndex(s => s.user_id === u.sub.user_id);
     if (si >= 0) subs[si].last_count = u.current;
   }
-  if (updated.length > 0) saveRss(subs);
+  saveRss(subs);
   
   if (!updated.length) {
     return new Response(`<div class="emp"><div style="font-size:.7rem;color:var(--fg4)">${l==='zh'?'所有订阅均无更新':'All subscriptions up to date'}</div></div>`, { headers: { "Content-Type": "text/html" } });
   }
   
   const items = updated.map((u, i) => {
-    const name = u.sub.name && u.sub.name !== u.sub.user_id ? u.sub.name : u.sub.user_id;
+    const name = u.sub.name && u.sub.name !== u.sub.user_id ? u.sub.name : `User ${u.sub.user_id}`;
     return `<div class="li" style="border-left:2px solid var(--accent);--i:${i*.05}">
-      <div class="li-th" style="background:var(--accent-dim);color:var(--accent);font-size:.65rem;font-family:var(--mono)">NEW</div>
+      <div class="li-th" style="background:var(--accent-dim);color:var(--accent);font-size:.65rem;font-family:var(--mono);overflow:hidden">${rssAuthorThumb(u.sub)}</div>
       <div class="li-bd">
-        <div class="li-t">${esc(name)}</div>
+        <div class="li-t">${I.rss} ${esc(name)}</div>
         <div class="li-m" style="font-family:var(--mono)">+${u.delta} ${l==='zh'?'部新作品':'new videos'} &middot; ${l==='zh'?'共':'Total'} ${u.current}</div>
       </div>
       <div class="li-act">
@@ -617,59 +673,56 @@ app.get("/api/rss/dashboard", async ({ headers }) => {
 });
 
 // RSS subscriptions
-app.get("/rss", ({ headers }) => {
+app.get("/rss", async ({ headers }) => {
   if (!isAuthed(headers)) return Response.redirect("/login", 302);
   const l = gl(headers);
-  return hx(rssPage(l, loadRss()), l, t("rss", l), "rs", headers);
+  const subs = await refreshRssProfiles(loadRss());
+  return hx(rssPage(l, subs), l, t("rss", l), "rs", headers);
 });
 app.post("/api/rss/add", async ({ body, headers }) => {
   if (!isAuthed(headers)) return Response.redirect("/login", 302);
   const l = gl(headers);
   const raw = body as any;
   const uid = String(raw?.user_id || "").trim().replace(/[^0-9]/g, "");
-  if (!uid) return new Response(rssPage(l, loadRss()), { headers: { "Content-Type": "text/html" } });
+  if (!uid) return new Response(rssBody(l, loadRss()), { headers: { "Content-Type": "text/html" } });
   const subs = loadRss();
   if (subs.find(s => s.user_id === uid)) {
-    return new Response(rssPage(l, subs, l === 'zh' ? '已订阅该作者' : 'Already subscribed'), { headers: { "Content-Type": "text/html" } });
+    return new Response(rssBody(l, subs, l === 'zh' ? '已订阅该作者' : 'Already subscribed'), { headers: { "Content-Type": "text/html" } });
   }
-  // Fetch initial count and author name
   const r = await getUserUploaded(uid, 0);
   const count = r.count || (r.videos || []).length;
-  let name = uid;
-  try {
-    const ENGINE2 = process.env.ENGINE_URL || "http://127.0.0.1:5001";
-    const nr2 = await fetch(ENGINE2, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "user_name", user_id: uid }) });
-    if (nr2.ok) { const nd2 = await nr2.json() as any; if (nd2.name && nd2.name !== `User ${uid}`) name = nd2.name; }
-  } catch {}
-  subs.push({ user_id: uid, name, last_count: count, added_at: Date.now() });
+  const profile = await fetchAuthorProfile(uid);
+  subs.push({ user_id: uid, name: profile.name, avatar: profile.avatar, last_count: count, added_at: Date.now(), last_checked_at: Date.now(), last_new_count: 0 });
   saveRss(subs);
-  return new Response(rssPage(l, subs, l === 'zh' ? `已添加 #${uid}，当前 ${count} 部作品` : `Added #${uid}, ${count} videos`), { headers: { "Content-Type": "text/html" } });
+  return new Response(rssBody(l, subs, l === 'zh' ? `已添加 ${profile.name}，当前 ${count} 部作品` : `Added ${profile.name}, ${count} videos`), { headers: { "Content-Type": "text/html" } });
 });
 app.post("/api/rss/check/:id", async ({ params: { id }, headers }) => {
   if (!isAuthed(headers)) return Response.redirect("/login", 302);
   const l = gl(headers);
   const subs = loadRss();
   const idx = subs.findIndex(s => s.user_id === id);
-  if (idx < 0) return new Response(rssPage(l, subs), { headers: { "Content-Type": "text/html" } });
+  if (idx < 0) return new Response(rssBody(l, subs), { headers: { "Content-Type": "text/html" } });
   const r = await getUserUploaded(id, 0);
   const count = r.count || (r.videos || []).length;
   const delta = count - subs[idx].last_count;
   subs[idx].last_count = count;
-  if (r.videos && r.videos.length > 0 && !subs[idx].name.startsWith('User ')) {
-    // Name update via first playlist — keep existing name for now
-  }
+  subs[idx].last_checked_at = Date.now();
+  subs[idx].last_new_count = Math.max(0, delta);
+  const profile = await fetchAuthorProfile(id);
+  subs[idx].name = profile.name || subs[idx].name;
+  subs[idx].avatar = profile.avatar || subs[idx].avatar;
   saveRss(subs);
   const msg = delta > 0
-    ? (l === 'zh' ? `#${id} 有 ${delta} 部新作品！` : `#${id} has ${delta} new videos!`)
-    : (l === 'zh' ? `#${id} 暂无更新` : `#${id} no updates`);
-  return new Response(rssPage(l, subs, msg), { headers: { "Content-Type": "text/html" } });
+    ? (l === 'zh' ? `${subs[idx].name} 有 ${delta} 部新作品！` : `${subs[idx].name} has ${delta} new videos!`)
+    : (l === 'zh' ? `${subs[idx].name} 暂无更新` : `${subs[idx].name} no updates`);
+  return new Response(rssBody(l, subs, msg), { headers: { "Content-Type": "text/html" } });
 });
 app.post("/api/rss/remove/:id", async ({ params: { id }, headers }) => {
   if (!isAuthed(headers)) return Response.redirect("/login", 302);
   const l = gl(headers);
   const subs = loadRss().filter(s => s.user_id !== id);
   saveRss(subs);
-  return new Response(rssPage(l, subs, l === 'zh' ? `已取消订阅 #${id}` : `Unsubscribed #${id}`), { headers: { "Content-Type": "text/html" } });
+  return new Response(rssBody(l, subs, l === 'zh' ? `已取消订阅 #${id}` : `Unsubscribed #${id}`), { headers: { "Content-Type": "text/html" } });
 });
 
 // Search router

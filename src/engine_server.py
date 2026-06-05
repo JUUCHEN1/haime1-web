@@ -153,6 +153,49 @@ def extract_video_details(html: str) -> tuple[list[str], str]:
     return tags, desc
 
 
+def extract_author_profile(html: str, user_id: str) -> dict:
+    name = ""
+    for pattern in [
+        r'<h3[^>]*>(.*?)</h3>',
+        r'<meta[^>]*property=["\']og:title["\'][^>]*content=["\']([^"\']*)',
+        r'<title>(.*?)</title>',
+    ]:
+        m = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+        if m:
+            name = strip_html(m.group(1))
+            break
+    if not name or name == f"User {user_id}":
+        name = f"User {user_id}"
+    name = re.sub(r'\s*[-|].*$', '', name).strip() or f"User {user_id}"
+
+    avatar = ""
+    avatar_patterns = [
+        r'<img[^>]*class=["\'][^"\']*(?:avatar|user|profile)[^"\']*["\'][^>]*(?:src|data-src)="([^"\']+)"',
+        r'<img[^>]*(?:src|data-src)="([^"\']+)"[^>]*class=["\'][^"\']*(?:avatar|user|profile)[^"\']*["\']',
+        r'<meta[^>]*property=["\']og:image["\'][^>]*content=["\']([^"\']*)',
+    ]
+    for pattern in avatar_patterns:
+        m = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+        if m:
+            avatar = normalize_url(m.group(1))
+            break
+    return {"user_id": user_id, "name": name, "avatar": avatar}
+
+
+def action_user_profile(scraper, user_id: str):
+    for url, label in [
+        (f"{BASE_URL}/user/{user_id}", f"user_profile {user_id}"),
+        (f"{BASE_URL}/user/{user_id}/playlists", f"user_profile_playlists {user_id}"),
+        (f"{BASE_URL}/user/{user_id}/uploaded", f"user_profile_uploaded {user_id}"),
+    ]:
+        r = fetch_page(scraper, url, label, timeout=15, min_len=100)
+        if r and r.status_code == 200:
+            profile = extract_author_profile(r.text, user_id)
+            if profile.get("name") or profile.get("avatar"):
+                return profile
+    return {"user_id": user_id, "name": f"User {user_id}", "avatar": ""}
+
+
 def cover_candidates(scraper, video_id: str, info=None) -> list[str]:
     candidates = []
     if info and info.get("cover_url"):
@@ -383,21 +426,14 @@ class EngineHandler(BaseHTTPRequestHandler):
             elif action == "user_name":
                 uid = request.get("user_id", "")
                 try:
-                    # Try user main page (more reliable for author name)
-                    for u in [f"{BASE_URL}/user/{uid}", f"{BASE_URL}/user/{uid}/playlists"]:
-                        r = self.scraper.get(u, timeout=15)
-                        if r.status_code == 200:
-                            m = re.search(r'<h3[^>]*>(.*?)</h3>', r.text)
-                            if m: name = re.sub(r'<[^>]+>', '', m.group(1)).strip(); break
-                            m = re.search(r'<title>(.*?)</title>', r.text)
-                            if m: name = re.sub(r'<[^>]+>', '', m.group(1)).strip(); break
-                    else:
-                        name = f"User {uid}"
-                    result["name"] = name
-                    result["user_id"] = uid
+                    result.update(action_user_profile(self.scraper, uid))
                 except Exception as e:
                     result["name"] = f"User {uid}"
+                    result["avatar"] = ""
                     result["error"] = str(e)
+            elif action == "user_profile":
+                uid = request.get("user_id", "")
+                result.update(action_user_profile(self.scraper, uid))
             elif action == "video_tags":
                 vid = request.get("video_id", "")
                 try:
