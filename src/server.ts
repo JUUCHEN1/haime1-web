@@ -7,177 +7,19 @@ import {
   getDownloadUrl,
 } from "./engine";
 import type { Playlist, VideoInfoResult } from "./engine";
-import { DlTask, dlQueue, addTask, cancelTask, clearDone } from "./download";
+import { dlQueue, addTask, cancelTask, clearDone } from "./download";
 import { findChannel } from "./channels/index";
-import { join } from "node:path";
-import { createHmac, randomBytes } from "node:crypto";
-import { readFileSync, writeFileSync, existsSync, statSync, rmdirSync, mkdirSync } from "node:fs";
-
-const APP = "hanime-web";
-const PORT = 3280;
-const PER_PAGE = 30;
-const DL_DIR = process.env.DL_DIR || join(process.env.HOME || "/tmp", "Downloads/hanime");
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin";
-const DATA_DIR = join(process.cwd(), "data");
-const PASSWORD_FILE = join(DATA_DIR, "admin-password.json");
-const PROXY_CONFIG_PATH = join(DATA_DIR, "proxy-config.json");
-const RSS_SUBS_PATH = join(DATA_DIR, "rss-subs.json");
-const RSS_CONFIG_PATH = join(DATA_DIR, "rss-config.json");
-const STORAGE_CONFIG_PATH = join(DATA_DIR, "storage-config.json");
-const DEFAULT_RSS_INTERVAL = 10800; // 3 hours
-const SESSION_SECRET = process.env.SESSION_SECRET || randomBytes(32).toString("hex");
-
-// Seed password file from env var on first boot
-if (!existsSync(DATA_DIR)) { mkdirSync(DATA_DIR, { recursive: true }); }
-// Seed password file from env var on first boot (so web UI can mutate it later)
-if (!existsSync(PASSWORD_FILE)) {
-  writeFileSync(PASSWORD_FILE, JSON.stringify({ password: ADMIN_PASSWORD }), "utf-8");
-}
-function getPassword(): string {
-  return safeReadJSON<{ password: string }>(PASSWORD_FILE, { password: ADMIN_PASSWORD }).password;
-}
-function setPassword(newPwd: string): void {
-  safeWriteJSON(PASSWORD_FILE, { password: newPwd });
-}
-
-// ─── Auth ────────────────────────────────────────────────────
-function signSession(val: string): string {
-  const hmac = createHmac("sha256", SESSION_SECRET);
-  hmac.update(val);
-  return `${val}.${hmac.digest("hex")}`;
-}
-function verifySession(cookie: string): boolean {
-  if (!cookie) return false;
-  const m = cookie.match(/\bauth=([^;]+)/);
-  if (!m) return false;
-  const parts = m[1].split(".");
-  if (parts.length !== 2) return false;
-  const hmac = createHmac("sha256", SESSION_SECRET);
-  hmac.update(parts[0]);
-  return hmac.digest("hex") === parts[1];
-}
-function isAuthed(h?: Record<string, string | undefined>): boolean {
-  return verifySession(h?.cookie || "");
-}
-
-// ─── File helpers (handle Docker volume directory mounts)
-function safeReadJSON<T>(path: string, fallback: T): T {
-  try {
-    const st = statSync(path);
-    if (st.isDirectory()) { rmdirSync(path); return fallback; }
-    if (st.isFile()) return JSON.parse(readFileSync(path, "utf-8"));
-  } catch { return fallback; }
-  return fallback;
-}
-function safeWriteJSON(path: string, data: unknown): void {
-  try {
-    // If path is a directory (Docker volume mount bug), remove it first
-    if (existsSync(path)) {
-      const st = statSync(path);
-      if (st.isDirectory()) rmdirSync(path);
-    }
-    writeFileSync(path, JSON.stringify(data, null, 2));
-  } catch (e) { console.error("[server] write error:", path, e); }
-}
-
-// ─── Proxy Config// ─── Proxy Config ────────────────────────────────────────────
-interface ProxyConfig { http: string; socks5: string; }
-function loadProxy(): ProxyConfig {
-  return safeReadJSON<ProxyConfig>(PROXY_CONFIG_PATH, { http: "", socks5: "" });
-}
-function saveProxy(cfg: ProxyConfig): void {
-  safeWriteJSON(PROXY_CONFIG_PATH, cfg);
-}
-// RSS config
-function loadRssConfig(): { interval_seconds: number } {
-  return safeReadJSON<{ interval_seconds: number }>(RSS_CONFIG_PATH, { interval_seconds: DEFAULT_RSS_INTERVAL });
-}
-function saveRssConfig(cfg: { interval_seconds: number }): void {
-  safeWriteJSON(RSS_CONFIG_PATH, cfg);
-}
-
-function getEngineProxy(): string {
-  const cfg = loadProxy();
-  return cfg.socks5 || cfg.http || "";
-}
-
-// ─── Cache ───────────────────────────────────────────────────
-const cache = new Map<string, { v: string[]; c: number; p: number; t: number }>();
-const CACHE_TTL = 5 * 60 * 1000;
-function cget(k: string) { const x = cache.get(k); if (x && Date.now() - x.t < CACHE_TTL) return x; return null; }
-function cset(k: string, v: string[], c: number, p: number) { cache.set(k, { v, c, p, t: Date.now() }); }
-
-// ─── RSS Subscriptions ──────────────────────────────────────
-interface RssSub { user_id: string; name: string; last_count: number; added_at: number; }
-function loadRss(): RssSub[] {
-  return safeReadJSON<RssSub[]>(RSS_SUBS_PATH, []);
-}
-function saveRss(subs: RssSub[]): void {
-  safeWriteJSON(RSS_SUBS_PATH, subs);
-}
-async function checkRssSub(sub: RssSub): Promise<{ new_count: number; new_videos: number; name: string }> {
-  const r = await getUserUploaded(sub.user_id, 0);
-  const vids = r.videos || [];
-  const cnt = r.count || vids.length;
-  const name = sub.name && sub.name !== sub.user_id ? sub.name : (vids.length ? `User ${sub.user_id}` : sub.user_id);
-  return { new_count: cnt, new_videos: Math.max(0, cnt - sub.last_count), name };
-}
-
-// ─── i18n ───────────────────────────────────────────────────
-type Lang = "zh" | "en";
-function gl(h?: Record<string, string | undefined>): Lang {
-  const m = (h?.cookie || "").match(/\blang=(zh|en)\b/);
-  return (m?.[1] as Lang) || "zh";
-}
-const T: Record<string, string> = {
-  home:"首页|Home",pl:"播放列表|Playlists",up:"上传视频|Uploads",dl:"下载管理|Downloads",
-  dc:"下载中心|Download Center",dc_single:"单视频|Single Video",dc_user:"作者作品|Author",
-  dc_single_desc:"输入视频链接或ID查看详情后下载|Enter a video link or ID to preview and download",
-  dc_user_desc:"输入用户链接或ID浏览所有作品|Enter a user link or ID to browse all works",
-  dc_input_ph:"输入 URL 或 ID|Enter URL or ID",dc_quality:"画质|Quality",
-  dc_preview:"查看|Preview",dc_no_result:"未找到结果|No result found",dc_loading:"加载中...|Loading...",
-  quick:"快捷访问|Quick Access",user:"用户|User",search:"搜索用户ID...|Search user ID...",
-  enter:"按 Enter 搜索|Press Enter to search",load:"加载中...|Loading...",back:"返回|Back",
-  play:"播放|Play",dl_btn:"下载|DL",dl_all:"下载全部|DL All",dl_works:"下载全部作品|DL All Works",
-  dl_q:"下载队列|Queue",dl_run:"下载中|Downloading",dl_done:"已完成|Completed",
-  dl_err:"失败|Failed",dl_wait:"排队中|Queued",clear:"清除已完成|Clear Done",
-  no_dl:"暂无下载任务|No tasks",cancel:"取消|Cancel",dl_cancel:"已取消|Cancelled",
-  dl_to:"下载到|Save to",srch:"搜索|Search",sing:"单个视频下载|Single Video",
-  pl_v:"个视频| videos",about:"浏览和下载 hanime1.me 视频。输入用户ID查看内容，支持单视频/播放列表/作者三种下载模式。|Browse and download hanime1.me videos. Enter a user ID to browse. Supports single, playlist, and author downloads.",
-  unavailable:"视频不可用|Video unavailable",no_info:"无信息|No info",
-  searching:"搜索中...|Searching...",result:"结果|Results",
-  rss:"RSS订阅|RSS Subs",rss_desc:"监控作者更新，有新作品时显示提醒|Monitor authors for new uploads",
-  rss_add:"添加订阅|Add Sub",rss_check:"检查更新|Check",rss_remove:"取消订阅|Remove",
-  rss_new:"新|NEW",rss_total:"共|Total",rss_none:"暂无订阅|No subscriptions",
-  rss_checking:"检查中...|Checking...",rss_updated:"有新内容|New content",
-};
-function t(k: string, lang: Lang): string { const x = T[k]; return x ? x.split("|")[lang === "zh" ? 0 : 1] : k; }
-function esc(s: string): string { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;"); }
-function stripHtml(s: string): string { return s.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim(); }
-function ts(k: string, lang: Lang): string { return esc(t(k, lang)); }
-
-// ─── SVG Icons ──────────────────────────────────────────────
-const svg = (d: string) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
-const I = {
-  home: svg(`<path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>`),
-  list: svg(`<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>`),
-  up: svg(`<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>`),
-  srch: svg(`<circle cx="10" cy="10" r="7"/><line x1="21" y1="21" x2="15" y2="15"/>`),
-  play: svg(`<polygon points="8,5 19,12 8,19" fill="currentColor"/>`),
-  dl: svg(`<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>`),
-  dl2: svg(`<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>`),
-  back: svg(`<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>`),
-  ch: svg(`<polyline points="9 18 15 12 9 6"/>`),
-  chL: svg(`<polyline points="15 18 9 12 15 6"/>`),
-  grid: svg(`<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>`),
-  usr: svg(`<path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/>`),
-  info: svg(`<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>`),
-  ok: svg(`<polyline points="20 6 9 17 4 12"/>`),
-  film: svg(`<rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/>`),
-  no: svg(`<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>`),
-  rss: svg(`<path d="M4 11a9 9 0 019 9"/><path d="M4 4a16 16 0 0116 16"/><circle cx="5" cy="19" r="1"/>`),
-  zz: svg(`<circle cx="12" cy="12" r="10"/><line x1="10" y1="15" x2="15" y2="9"/><circle cx="10" cy="9" r="1.5"/><circle cx="15" cy="15" r="1.5"/>`),
-};
+import { APP, DL_DIR, ENGINE_URL, PER_PAGE, PORT } from "./config";
+import { getPassword, isAuthed, setPassword, signSession, verifySession } from "./auth";
+import { cget, cset } from "./cache";
+import { gl, esc, stripHtml, t, ts } from "./i18n";
+import type { Lang } from "./i18n";
+import { I } from "./icons";
+import { loadRss, loadRssConfig, saveRss, saveRssConfig } from "./rss";
+import type { RssSub } from "./rss";
+import { checkStorage, loadStorage, saveStorage } from "./storage";
+import type { StorageConfig } from "./storage";
+import { loadProxy, saveProxy } from "./proxy";
 
 // ─── Client JS ──────────────────────────────────────────────
 const i18nJS = (lang: Lang) => `<script>var _l='${lang}';function setLang(l){document.cookie='lang='+l+';path=/;max-age=31536000';localStorage.setItem('lang',l);location.reload()}
@@ -1088,58 +930,5 @@ app.get("/api/dlstatus", ({ headers }) => {
   return new Response(items, { headers: { "Content-Type": "text/html" } });
 });
 
-const port = process.env.PORT ? parseInt(process.env.PORT) : PORT;
-app.listen(port);
-console.log(`  ${APP} v4 at http://localhost:${port}`);
-// ─── Storage config ───────────────────────────────────
-type StorageProtocol = "local" | "webdav" | "smb" | "ftp";
-interface StorageConfig { protocol: StorageProtocol; host: string; port: string; username: string; password: string; path: string; enabled: boolean; }
-let _storageCfg: StorageConfig | null = null;
-function loadStorage(): StorageConfig {
-  if (_storageCfg) return _storageCfg;
-  try { _storageCfg = safeReadJSON(STORAGE_CONFIG_PATH) as StorageConfig; } catch {}
-  return _storageCfg || { protocol: "local", host: "", port: "", username: "", password: "", path: "/downloads", enabled: false };
-}
-function saveStorage(cfg: StorageConfig): void {
-  _storageCfg = cfg;
-  safeWriteJSON(STORAGE_CONFIG_PATH, cfg);
-  checkStorage();
-}
-function checkStorage(cfgIn?: any): string {
-  const c = cfgIn || loadStorage();
-  if (!c.enabled || c.protocol === "local") return "ok";
-  try {
-    let cmd = "";
-    // Build URL from host (auto-add scheme if missing)
-    let url = c.host || "";
-    if (c.protocol === "webdav" && !url.startsWith("http")) {
-      url = "http://" + url;
-    }
-    if (c.protocol === "ftp" && !url.startsWith("ftp")) {
-      url = "ftp://" + url.replace(/^\/*/, "");
-    }
-    const remote = url + (c.path || "");
-    const creds = c.username ? `-u "${c.username}:${c.password}"` : "";
-    if (c.protocol === "webdav") {
-      cmd = `curl -s --connect-timeout 8 -o /dev/null -w "%{http_code}" ${creds} -X PROPFIND -H "Depth: 0" "${remote}" 2>&1`;
-    } else if (c.protocol === "smb") {
-      const smbAuth = c.username ? `-U "${c.username}%${c.password}"` : "-N";
-      const smbPath = `//${c.host}/${c.path}`;
-      cmd = `smbclient ${smbAuth} -c 'ls' "${smbPath}" 2>&1`;
-    } else if (c.protocol === "ftp") {
-      cmd = `curl -s -o /dev/null -w "%{http_code}" ${creds} "${remote}" 2>&1`;
-    }
-    if (!cmd) return "unknown protocol";
-    const r = Bun.spawnSync(["sh", "-c", cmd], { timeout: 10000 });
-    const out = new TextDecoder().decode(r.stdout || r.stderr || new Uint8Array()).trim();
-    // HTTP codes: 2xx = ok for webdav/ftp
-    if (c.protocol === "webdav" || c.protocol === "ftp") {
-      const code = parseInt(out);
-      if (code >= 200 && code < 400) return "ok";
-      return `HTTP ${out} on ${remote}`;
-    }
-    // SMB: exitCode === 0 means ok
-    return r.exitCode === 0 ? "ok" : (out.slice(0, 200) || "smb connect failed");
-  } catch (e: any) { return e.message || "error"; }
-}
-
+app.listen(PORT);
+console.log(`  ${APP} v4 at http://localhost:${PORT}`);
